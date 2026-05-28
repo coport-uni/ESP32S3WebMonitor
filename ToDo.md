@@ -515,4 +515,4 @@ GPIO 충돌 확인:
 - [x] `poll_once()`에서 `ui_claude_set_data(&d);` 직후에만 `usage_led_pulse_orange();` 호출 — 실패 경로(`ui_claude_set_unavailable(...)`)는 그대로 통과 ([main/claude_usage.c:269](main/claude_usage.c#L269)).
 - [x] `idf.py build` 통과, 내 모듈 경고 0 (기존 LV_MEM_CUSTOM kconfig 경고만 잔존, 무관). 빌드 산출물: `build/my_box3_sensor.bin` (0x13bdf0 B).
 - [ ] 실기기 flash 후 폴 주기마다(`CONFIG_CLAUDE_USAGE_POLL_INTERVAL_S`) LED가 짧게 주황색으로 깜빡이는지 시각 확인. — 사용자 확인 대기
-- [ ] GitHub Issue 생성(원격 있을 때) + 커밋/푸시. — 진행 중
+- [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#15](https://github.com/coport-uni/ESP32S3WebMonitor/issues/15), commit `ef5eddf`, pushed to `origin/main`.
