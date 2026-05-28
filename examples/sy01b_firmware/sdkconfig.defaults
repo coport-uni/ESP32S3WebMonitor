@@ -26,6 +26,11 @@ CONFIG_ESP_WIFI_SOFTAP_SUPPORT=n
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
 CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
 
+# --- Tasks ---
+# app_main does BSP + display + WiFi + LVGL init back-to-back; the
+# 3584 B default overflows once the pp_timer ISR fires during connect.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 # --- LVGL ---
 # BSP picks LVGL config; we just make sure double-buffering uses PSRAM.
 CONFIG_BSP_DISPLAY_LVGL_BUF_PSRAM=y
