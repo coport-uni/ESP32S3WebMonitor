@@ -12,6 +12,6 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\USER_55_DeepLearning\\Desktop\\workspace\\container\\Espress_dev\\build"
   ],
-  "idf.portWin": "COM13",
+  "idf.portWin": "COM3",
   "idf.flashType": "JTAG"
 }

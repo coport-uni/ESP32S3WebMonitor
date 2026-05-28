@@ -1,4 +1,31 @@
 {
+  "permissions": {
+    "allow": [
+      "PowerShell($files = @\\('CMakeLists.txt','idf_component.yml','main.c','ui.c','ui.h','sensors.c','sensors.h','audio_check.c','audio_check.h','ir_check.c','ir_check.h','buttons_check.c','buttons_check.h'\\); foreach \\($f in $files\\) { git mv \"examples/sensor_example/$f\" \"examples/sensor_example/main/$f\" }; if \\($?\\) { Write-Output \"sensor_example: moved $\\($files.Count\\) files\" })",
+      "Bash(git -C \"c:/Users/USER_55_DeepLearning/Desktop/workspace/container/Espress_dev\" log --oneline -5)",
+      "PowerShell($files = @\\('CMakeLists.txt','Kconfig.projbuild','idf_component.yml','main.c','ui.c','ui.h','network.c','network.h','beszel.c','beszel.h','buttons_check.c','buttons_check.h'\\); foreach \\($f in $files\\) { git mv \"examples/server_monitor/$f\" \"examples/server_monitor/main/$f\" }; if \\($?\\) { Write-Output \"server_monitor: moved $\\($files.Count\\) files\" })",
+      "Bash(git -C \"c:/Users/USER_55_DeepLearning/Desktop/workspace/container/Espress_dev\" diff main/ui.c main/buttons_check.h main/network.h)",
+      "Bash(git -C c:/Users/USER_55_DeepLearning/Desktop/workspace/container/Espress_dev commit main/ui.c main/buttons_check.h main/network.h ToDo.md -m ' *)",
+      "Bash(git -C \"c:/Users/USER_55_DeepLearning/Desktop/workspace/container/Espress_dev\" push origin main)",
+      "Bash(git -C \"c:/Users/USER_55_DeepLearning/Desktop/workspace/container/Espress_dev\" status --short)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(Get-Command idf.py -ErrorAction SilentlyContinue)",
+      "PowerShell(if \\(Test-Path 'C:\\\\Espressif\\\\idf_versions.txt'\\) { Get-Content 'C:\\\\Espressif\\\\idf_versions.txt' }; \\(Test-Path 'C:\\\\Espressif\\\\Initialize-Idf.ps1'\\))",
+      "PowerShell($env:IDF_TOOLS_PATH = 'C:\\\\Espressif'; . 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.5.4\\\\export.ps1' 2>&1 | Select-Object -Last 3; Get-Command idf.py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)",
+      "PowerShell($env:IDF_PATH = 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.5.4'; $env:IDF_TOOLS_PATH = 'C:\\\\Espressif'; $pyenv = Get-ChildItem 'C:\\\\Espressif\\\\python_env' -Directory | Select-Object -First 1; Write-Output \"pyenv=$\\($pyenv.FullName\\)\"; $idfpy = Join-Path $pyenv.FullName 'Scripts\\\\python.exe'; if \\(Test-Path $idfpy\\) { Write-Output \"python ok: $idfpy\" } else { Write-Output 'python missing' })",
+      "PowerShell($env:IDF_PATH = 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.5.4'; $env:IDF_TOOLS_PATH = 'C:\\\\Espressif'; $env:IDF_PYTHON_ENV_PATH = 'C:\\\\Espressif\\\\python_env\\\\idf6.0_py3.12_env'; & \"$env:IDF_PYTHON_ENV_PATH\\\\Scripts\\\\python.exe\" \"$env:IDF_PATH\\\\tools\\\\idf_tools.py\" --version 2>&1 | Select-Object -First 5)",
+      "PowerShell($env:IDF_PATH = 'C:\\\\Espressif\\\\frameworks\\\\esp-idf-v5.5.4'; $env:IDF_TOOLS_PATH = 'C:\\\\Espressif'; $env:IDF_PYTHON_ENV_PATH = 'C:\\\\Espressif\\\\python_env\\\\idf6.0_py3.12_env'; $exports = & \"$env:IDF_PYTHON_ENV_PATH\\\\Scripts\\\\python.exe\" \"$env:IDF_PATH\\\\tools\\\\idf_tools.py\" export --format key-value 2>&1; Write-Output \\($exports | Select-Object -First 20\\))",
+      "PowerShell($env:IDF_PATH = 'C:\\\\esp\\\\.espressif\\\\v6.0.1\\\\esp-idf'; $env:IDF_PYTHON_ENV_PATH = 'C:\\\\Espressif\\\\tools\\\\python\\\\v6.0.1\\\\venv'; $env:IDF_TOOLS_PATH = 'C:\\\\Espressif'; . 'C:\\\\esp\\\\.espressif\\\\v6.0.1\\\\esp-idf\\\\export.ps1' 2>&1 | Select-Object -Last 5; Write-Output '---'; Get-Command idf.py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)",
+      "PowerShell($null = [System.Management.Automation.Language.Parser]::ParseFile\\('DeviceChange.ps1', [ref]$null, [ref]$errors\\); if \\($errors\\) { $errors | ForEach-Object { Write-Host $_ } } else { Write-Host 'OK: syntax clean' })",
+      "PowerShell($errors = $null; $tokens = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile\\(\\(Resolve-Path 'DeviceChange.ps1'\\).Path, [ref]$tokens, [ref]$errors\\); if \\($errors\\) { $errors | ForEach-Object { Write-Host $_ } } else { Write-Host 'OK: no parse errors' })",
+      "PowerShell(gh repo view --json nameWithOwner)",
+      "PowerShell(gh auth status 2>&1)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8765)",
+      "Bash(git check-ignore *)",
+      "Bash(git checkout *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
