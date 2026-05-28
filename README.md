@@ -5,6 +5,8 @@ A LVGL dashboard for the [ESP32-S3-BOX-3](https://github.com/espressif/esp-box) 
 - **One tab per Beszel host** — polls a self-hosted [Beszel](https://beszel.dev/) (PocketBase) instance over HTTP and shows live CPU / MEM / GPU / DISK usage as horizontal bars, plus uptime and an UP/DOWN indicator.
 - **One always-present `Claude` tab** — polls a tiny Python HTTP server on the host PC that serves `ClaudeUsage.csv` (current session %, time until reset, weekly all-models %).
 
+An optional **external RGB heartbeat LED** wired to PMOD1 (R=GPIO 21, G=GPIO 38, B=GPIO 39, common cathode) blinks orange for ~300 ms every time a fresh Claude usage CSV is successfully received and parsed. The firmware boots and runs normally without the LED attached.
+
 This README walks an absolute beginner from a fresh Windows PC to flashing the firmware. If you have already used ESP-IDF, jump straight to [Build, Flash, Monitor](#6-build-flash-monitor).
 
 ---
@@ -58,6 +60,7 @@ The `Claude` tab uses a different layout (no UP/DOWN, no uptime):
 - A **USB-C cable that carries data** (a charge-only cable is the #1 cause of "device not detected")
 - A reachable **Beszel** server on the same WiFi network (HTTP / HTTPS both work; the project defaults to plain HTTP)
 - For the Claude tab: a host PC on the same LAN that runs [`claude_usage_server.py`](claude_usage_server.py) and owns a `ClaudeUsage.csv` somewhere in the workspace. Optional — the Claude tab simply shows `server unreachable` if no server is running.
+- *(Optional)* A **common-cathode RGB LED** (or three discrete LEDs sharing a ground rail) on PMOD1 — R to GPIO 21, G to GPIO 38, B to GPIO 39, common to GND, with appropriate current-limit resistors (typically 220 Ω–1 kΩ per channel against the 3.3 V drive). The firmware blinks it orange (R+G ON, B OFF) for ~300 ms on every successful Claude usage poll, giving a visible "data is fresh" heartbeat from across the room. Skip the LED entirely if you don't need it — `usage_led_init()` only configures GPIOs and never blocks.
 
 The previous board self-test firmware (which also exercised the BOX-3-SENSOR extension's IMU, AHT30, AT581X radar, IR, and audio peripherals) is preserved as a frozen reference under [`examples/sensor_example/`](examples/sensor_example/) — see [Prior firmware: examples/sensor_example/](#prior-firmware-examplessensor_example) below.
 
@@ -208,6 +211,7 @@ Espress_dev/
 │   ├── network.c, .h       # non-blocking WiFi STA + auto-reconnect task
 │   ├── beszel.c, .h        # PocketBase REST client + 5 s poll task + host cache
 │   ├── claude_usage.c, .h  # 30 s CSV poll task + UTF-8 "X시간 Y분" parser
+│   ├── usage_led.c, .h     # PMOD1 RGB LED heartbeat — 300 ms orange pulse on each successful Claude poll
 │   ├── buttons_check.c, .h # CONFIG / MUTE physical buttons → ui_select_*_tab callbacks
 │   ├── Kconfig.projbuild   # menuconfig: Beszel + Claude usage
 │   ├── CMakeLists.txt      # SRCS + REQUIRES (esp_wifi, esp_http_client, …)
@@ -224,7 +228,7 @@ Espress_dev/
 └── README.md               # this file
 ```
 
-`app_main` initialization order is non-negotiable (see [CLAUDE.md](CLAUDE.md) "Initialization order"): I²C → display → backlight → UI under display lock → buttons → network → Beszel → Claude usage. Touching this order risks LVGL panics or WiFi/HTTP failure modes that look like network bugs.
+`app_main` initialization order is non-negotiable (see [CLAUDE.md](CLAUDE.md) "Initialization order"): I²C → display → backlight → UI under display lock → buttons → network → Beszel → usage LED → Claude usage. Touching this order risks LVGL panics or WiFi/HTTP failure modes that look like network bugs. `usage_led_init()` must run before `claude_usage_init()` so the poll task always sees a valid LED handle on its first successful response.
 
 Tab cycling is owned by [`ui.c`](main/ui.c): `ui_select_prev_tab` / `ui_select_next_tab` walk `lv_tabview_get_tab_count()`, so the buttons naturally include the Claude tab without either polling module needing to know about it. Pollers pass `active_idx = -1` to [`ui_beszel_replace_hosts`](main/ui.h) so they cannot fight the user's manual tab selection.
 
@@ -269,6 +273,7 @@ These cost real time and are documented in detail with file/line references in [
 - **`idf.py flash` cannot find the chip** — usually the USB-C cable is power-only, or Zadig drivers are swapped.
 - **`sdkconfig` overrides `sdkconfig.defaults`** once it exists. If you flip a Kconfig value in `sdkconfig.defaults` but the build still uses the old value, the answer is in `sdkconfig` — either patch it there too, or delete it and `idf.py reconfigure`.
 - **LVGL's default font has no Hangul glyphs** — only `lv_font_montserrat_14` is enabled. The Claude tab works around this by parsing the CSV's Korean "X시간 Y분" reset time on the ESP and rendering English "Xh YYm". Enabling `LV_FONT_SOURCE_HAN_SANS_SC_*_CJK` adds ~200 KB of flash and even then SC may not cover Hangul — keep parsing on the ESP.
+- **Not every GPIO is free for re-use, and not every pin can drive LEDC PWM** — on ESP32-S3 BOX-3, strapping pins (GPIO 0, 3, 45, 46), the flash/PSRAM data lanes (GPIO 26-37 with octal PSRAM), the USB-Serial-JTAG pair (GPIO 19/20), and pins claimed by the BSP for touch/audio/display/SD all have hard restrictions. Assigning `ledc_channel_config` to a pin that does not support LEDC routing on this part, or one already owned by the BSP, panics at boot — often *after* `gpio_config` returns OK, so the symptom is a reset loop rather than an `ESP_ERROR_CHECK` print. The Claude heartbeat LED uses PMOD1 (GPIO 21 / 38 / 39 = IO5/IO7/IO3) and drives it as plain digital ON/OFF for exactly this reason. See [LearnedPatterns §4.2](LearnedPatterns.md#42-verify-gpio-capability-and-current-usage-before-assigning-a-pin-datasheet--bsp--project) for the three-step pre-flight check (datasheet capability → BSP grep → project grep) before claiming any new GPIO.
 
 ---
 

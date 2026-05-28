@@ -516,3 +516,16 @@ GPIO 충돌 확인:
 - [x] `idf.py build` 통과, 내 모듈 경고 0 (기존 LV_MEM_CUSTOM kconfig 경고만 잔존, 무관). 빌드 산출물: `build/my_box3_sensor.bin` (0x13bdf0 B).
 - [ ] 실기기 flash 후 폴 주기마다(`CONFIG_CLAUDE_USAGE_POLL_INTERVAL_S`) LED가 짧게 주황색으로 깜빡이는지 시각 확인. — 사용자 확인 대기
 - [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#15](https://github.com/coport-uni/ESP32S3WebMonitor/issues/15), commit `ef5eddf`, pushed to `origin/main`.
+
+## 2026-05-28 | README + LearnedPatterns 업데이트 (LED 작업 결과 + 핀 선정 절차)
+
+목적: 오늘 추가된 RGB LED 인디케이터(R=GPIO 21, G=GPIO 38, B=GPIO 39)를 README에 반영하고, 같은 작업의 첫 시도(R=10/11/12, LEDC PWM)에서 관찰된 부팅 오류를 공식 경고로 남긴다. 같은 함정을 다시 밟지 않도록 LearnedPatterns에 "핀 할당 전 capability + 점유 여부 3단계 체크" 절차를 등록한다.
+
+### 작업 항목
+
+- [x] `README.md` 인트로에 LED 하트비트 1문단 추가 ([README.md:7](README.md#L7)).
+- [x] `README.md` Hardware required에 옵션 common-cathode RGB LED 항목 추가 ([README.md:62](README.md#L62)).
+- [x] `README.md` Project layout `main/` 리스팅에 `usage_led.c, .h` 추가 + init 순서 설명에 `usage_led_init()` 위치 명시 ([README.md:212](README.md#L212), [README.md:230](README.md#L230)).
+- [x] `README.md` Common pitfalls에 "GPIO/LEDC 할당 시 boot panic" 경고 추가, LP §4.2 링크 ([README.md:272](README.md#L272)).
+- [x] `LearnedPatterns.md` §4.2 신규: 핀 할당 전 datasheet → BSP grep → project grep 3단계 체크, 결과를 ToDo에 기록할 것.
+- [ ] 커밋 + 푸시. — 진행 중

@@ -113,6 +113,27 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 - **Fix**: When the suspicious value matches a literal piece of the format string ("f", "d", "%"), check the formatter implementation before the data path.
 - **Rule**: A printed character that looks like a format specifier means the formatter dropped the conversion. Audit the printf implementation before the data source. (from ToDo: 2026-05-11 Accel/Gyro "f" 표시 + AHT30 미동작 진단)
 
+### 4.2 Verify GPIO capability and current usage before assigning a pin (datasheet → BSP → project)
+
+- **Problem**: First attempt at the Claude-usage heartbeat LED (2026-05-15 ToDo entry) picked R=GPIO 10, G=GPIO 11, B=GPIO 12 and drove them via LEDC PWM. The justification recorded in ToDo.md was only "the project's `main/` doesn't initialize SD or PMOD2, so the pins are free for LEDC output". Flashing the resulting firmware boot-looped — not the kind of error `ESP_ERROR_CHECK` would catch, but a reset before any task logged. Re-picking R/G/B as GPIO 21 / 38 / 39 (PMOD1 IO5/IO7/IO3) and dropping PWM in favour of digital R+G ON worked first try (commit `ef5eddf`).
+- **Cause**: Two distinct hazards conflated into the single check "is `main/` calling something on this pin?":
+  - **Peripheral capability** — not every ESP32-S3 GPIO can drive every peripheral. Strapping pins (GPIO 0, 3, 45, 46), flash/PSRAM data lanes (GPIO 26-37 on BOX-3 octal PSRAM), and the USB-Serial-JTAG pair (GPIO 19/20) have hard restrictions. LEDC routing in particular goes through the GPIO matrix but can fail at boot if the pin is already driven by another committed peripheral. The TRM § "IO MUX function list" is the source of truth, not memory.
+  - **Latent BSP / hardware ownership** — "the project's `main/` doesn't touch the pin" is not the same as "no code touches the pin". `bsp_display_start()`, `bsp_i2c_init()`, `bsp_iot_button_create()`, and `bsp_audio_codec_*` each silently claim a handful of pins as part of their initialization. The BOX-3 BSP header `managed_components/espressif__esp-box-3/include/bsp/esp-box-3.h` documents the full ownership map, but only if you grep it. The 2026-05-15 ToDo note acknowledged GPIO 10/11/12 are mapped to SDMMC / PMOD2 SPI in the BSP and then dismissed the conflict because the project didn't init SD — which turned out to be the wrong call.
+- **Fix**: Before assigning any GPIO in `gpio_config` / `ledc_channel_config` / `rmt_*_config` / similar, run a three-step pre-flight check **and write the result of each step into ToDo.md** so the reasoning is auditable:
+  1. **Capability** — verify in the [ESP32-S3 Technical Reference Manual](https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf) §5 (IO MUX) that the pin can be routed to the intended peripheral. Cross-check against the strapping / flash / PSRAM reserved ranges for **this board** (BOX-3 = octal PSRAM, so GPIO 26-37 are off-limits even though the TRM lists them as general-purpose on bare S3).
+  2. **BSP ownership** — grep the BSP header and source for the pin number, including pins reached transitively through `bsp_display_start` / `bsp_i2c_init`:
+     ```powershell
+     Select-String -Path managed_components/espressif__esp-box-3/include/bsp/esp-box-3.h -Pattern "GPIO_NUM_<n>\b"
+     Select-String -Path managed_components/espressif__esp-box-3/esp-box-3.c          -Pattern "GPIO_NUM_<n>\b"
+     ```
+     Any pin appearing in a `BSP_*` macro is reserved once the matching `bsp_*_init` runs, even if your code never names the macro.
+  3. **Project ownership** — grep `main/` for the pin number across all source, headers, and Kconfig files, including currently-disabled modules and commented stubs that may be reactivated later:
+     ```powershell
+     Select-String -Path main\*.c, main\*.h, main\Kconfig* -Pattern "GPIO_NUM_<n>\b"
+     ```
+  Prefer pins that are explicitly exposed for external use — on BOX-3 that's PMOD1 (`BSP_PMOD1_IO3 / IO5 / IO7 / IO8` = GPIO 39 / 21 / 38 / 40), which were chosen for the new heartbeat LED for exactly this reason.
+- **Rule**: Pin numbers are never picked from memory or from "the project doesn't import that module". Run capability → BSP → project before writing the configuration, and record the three findings in the ToDo entry so a reviewer can see the work. If any step is uncertain, choose a different pin or test on a breadboard before soldering. (from ToDo: 2026-05-28 Claude 사용량 갱신 시 RGB LED 주황 깜빡 (핀 재지정))
+
 ---
 
 ## §5. Environment Specifics
