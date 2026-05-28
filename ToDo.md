@@ -528,4 +528,4 @@ GPIO 충돌 확인:
 - [x] `README.md` Project layout `main/` 리스팅에 `usage_led.c, .h` 추가 + init 순서 설명에 `usage_led_init()` 위치 명시 ([README.md:212](README.md#L212), [README.md:230](README.md#L230)).
 - [x] `README.md` Common pitfalls에 "GPIO/LEDC 할당 시 boot panic" 경고 추가, LP §4.2 링크 ([README.md:272](README.md#L272)).
 - [x] `LearnedPatterns.md` §4.2 신규: 핀 할당 전 datasheet → BSP grep → project grep 3단계 체크, 결과를 ToDo에 기록할 것.
-- [ ] 커밋 + 푸시. — 진행 중
+- [x] 커밋 + 푸시. → commit `c8960ea`, pushed to `origin/main`.
