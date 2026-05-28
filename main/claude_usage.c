@@ -15,6 +15,7 @@
 
 #include "network.h"
 #include "ui.h"
+#include "usage_led.h"
 
 static const char *TAG = "claude_usage";
 
@@ -266,6 +267,7 @@ static void poll_once(void)
     ESP_LOGI(TAG, "session=%d%% week=%d%% reset=%dh%02dm ts=%s",
              d.session_pct, d.week_all_pct, d.reset_h, d.reset_m, ts_buf);
     ui_claude_set_data(&d);
+    usage_led_pulse_orange();
     free(resp.buf);
 }
 

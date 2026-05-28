@@ -9,6 +9,7 @@
 #include "network.h"
 #include "beszel.h"
 #include "claude_usage.h"
+#include "usage_led.h"
 
 static const char *TAG = "main";
 
@@ -42,6 +43,7 @@ void app_main(void)
 
     network_init();
     beszel_init();
+    ESP_ERROR_CHECK(usage_led_init());
     claude_usage_init();
 
     ESP_LOGI(TAG, "init complete");

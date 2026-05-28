@@ -6,6 +6,7 @@ idf_component_register(
         "network.c"
         "beszel.c"
         "claude_usage.c"
+        "usage_led.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
@@ -14,4 +15,6 @@ idf_component_register(
         esp_event
         esp_http_client
         esp-tls
+        driver
+        esp_timer
 )

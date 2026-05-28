@@ -460,3 +460,59 @@ examples/sy01b_firmware/
 - [x] 사용자 실기기 검증 — VSCode에서 OpenOCD 정상 동작 ✅
 - [x] GitHub Issue 생성: https://github.com/coport-uni/ESP32S3WebMonitor/issues/13
 - [x] 커밋 + push: `462589e tools: make DeviceChange.ps1 reusable (auto workspaceHash, backup, idempotent)` (Closes #13)
+
+
+## 2026-05-28 | Claude 사용량 갱신 시 RGB LED 주황 점등 (G10/G11/G12)
+
+목적: 서버에서 새 Claude 사용량 CSV가 성공적으로 수신·파싱되어 UI에 반영되는 순간, 외부 RGB LED(R=GPIO10, G=GPIO11, B=GPIO12, common cathode)에 주황색이 약 250 ms 동안 들어왔다가 꺼지는 시각적 인디케이터를 추가한다.
+
+결정 사항 (사전 확인):
+- 타이밍: 갱신 성공 시 짧게(약 250 ms) 깜빡 (사용자 확정)
+- 색상 구현: LEDC PWM 3채널, R=full / G≈40
+
+## 2026-05-28 | Claude 사용량 갱신 시 RGB LED 주황 점등 (G10/G11/G12)
+
+목적: 서버에서 새 Claude 사용량 CSV가 성공적으로 수신·파싱되어 UI에 반영되는 순간, 외부 RGB LED(R=GPIO10, G=GPIO11, B=GPIO12, common cathode)에 주황색이 약 250 ms 동안 들어왔다가 꺼지는 시각적 인디케이터를 추가한다.
+
+결정 사항 (사전 확인):
+- 타이밍: 갱신 성공 시 짧게(약 250 ms) 깜빡 (사용자 확정)
+- 색상 구현: LEDC PWM 3채널, R=full / G≈40% / B=0 (실제 주황색)
+- LED 배선: common cathode — high duty가 점등
+
+GPIO 충돌 확인:
+- BOX-3 BSP에서 GPIO 10/11/12는 SDMMC(SD)와 PMOD2 SPI에 매핑되어 있으나, 본 프로젝트는 SD/PMOD2를 초기화하지 않으므로 LEDC 출력으로 재할당 가능.
+
+### 작업 항목
+
+- [ ] 신규 모듈 `main/usage_led.c` / `main/usage_led.h` 생성: `usage_led_init()`(LEDC 타이머/3채널 설정), `usage_led_pulse_orange(uint32_t ms)`(주황 점등 → 지정 ms 후 소등). 핀과 PWM 듀티는 `#define`/`static const`로 명명 상수화.
+- [ ] `main/CMakeLists.txt`에 `usage_led.c` 추가, `REQUIRES`에 `driver` 누락 시 추가.
+- [ ] `main/main.c` `app_main()`에서 `claude_usage_init()` 이전에 `usage_led_init()` 호출.
+- [ ] `main/claude_usage.c` `poll_once()`에서 `ui_claude_set_data(&d);` 직후 `usage_led_pulse_orange(250);` 호출하여 갱신 성공 시에만 점등 (`ui_claude_set_unavailable` 경로에서는 호출하지 않음).
+- [ ] `idf.py build` warning 0.
+- [ ] 실기기 flash 후 서버 폴 주기마다 LED가 주황색으로 짧게 깜빡이는지 시각 확인.
+- [ ] GitHub Issue 생성 + 커밋/푸시.
+
+## 2026-05-28 | Claude 사용량 갱신 시 RGB LED 주황 깜빡 (핀 재지정)
+
+목적: 위 2026-05-15 항목의 후속. 사용자 결정에 따라 RGB LED 핀과 색상 구현 방식을 변경한다. 서버에서 새 Claude 사용량 데이터가 성공적으로 파싱·UI 반영될 때마다 외부 RGB LED에 주황불이 약 300 ms 동안 들어왔다가 꺼지는 시각적 인디케이터를 제공한다.
+
+결정 사항 (사전 확인 답변):
+- 결선: **Common cathode (active-high)** — 각 색상 핀에 HIGH 출력 시 점등
+- 동작: **약 300 ms 짧은 깜빡** (1회)
+- 색 표현: **디지털 R+G ON (PWM 없음, 노랑-주황 톤)** — B는 항상 LOW
+- 핀 매핑: **R=GPIO 21, G=GPIO 38, B=GPIO 39** (BOX-3 BSP 상 PMOD1_IO5 / PMOD1_IO7 / PMOD1_IO3)
+
+GPIO 충돌 확인:
+- 현재 `main/main.c`는 PMOD1을 사용하지 않음 (radar/IR 모듈 미통합). GPIO 21/38/39 자유.
+- 이전 2026-05-15 항목(R=10/11/12, PWM)은 미구현 상태로 남기되 본 항목으로 대체한다.
+
+### 작업 항목
+
+- [x] 신규 모듈 `main/usage_led.c` / `main/usage_led.h` 생성. → [main/usage_led.h](main/usage_led.h), [main/usage_led.c](main/usage_led.c) — gpio_config + esp_timer one-shot 사용, 호출 측 블로킹 없음.
+- [x] 핀 번호·펄스 길이를 `#define USAGE_LED_{R,G,B}_GPIO`, `USAGE_LED_PULSE_US`로 명명 상수화 ([main/usage_led.c:9-15](main/usage_led.c#L9-L15)).
+- [x] `main/CMakeLists.txt`에 `usage_led.c` + `REQUIRES driver`, `esp_timer` 추가 ([main/CMakeLists.txt:9,18,19](main/CMakeLists.txt)).
+- [x] `app_main()`에서 `claude_usage_init()` 직전에 `usage_led_init()` 호출 ([main/main.c:46](main/main.c#L46)).
+- [x] `poll_once()`에서 `ui_claude_set_data(&d);` 직후에만 `usage_led_pulse_orange();` 호출 — 실패 경로(`ui_claude_set_unavailable(...)`)는 그대로 통과 ([main/claude_usage.c:269](main/claude_usage.c#L269)).
+- [x] `idf.py build` 통과, 내 모듈 경고 0 (기존 LV_MEM_CUSTOM kconfig 경고만 잔존, 무관). 빌드 산출물: `build/my_box3_sensor.bin` (0x13bdf0 B).
+- [ ] 실기기 flash 후 폴 주기마다(`CONFIG_CLAUDE_USAGE_POLL_INTERVAL_S`) LED가 짧게 주황색으로 깜빡이는지 시각 확인. — 사용자 확인 대기
+- [ ] GitHub Issue 생성(원격 있을 때) + 커밋/푸시. — 진행 중
