@@ -145,7 +145,7 @@ UX: 한 호스트씩 CPU/Memory/GPU 바 그래프. CONFIG(=이전) / MUTE(=다�
 - [x] COM13 flash 완료 — hash verified, hard reset OK (`.claude/last-flash.log`)
 - [x] 화면 시각 확인: 디스크 % 값 Beszel 웹 UI와 일치 + 임계값별 색 전환 — 사용자 확인 ✅
 - [x] GitHub Issue 생성: https://github.com/coport-uni/Esp32S3-CrawlerDisplay/issues/4
-- [ ] 커밋 + push
+- [x] 커밋 + push: `2537e06 Add disk-usage row and severity-coloured metric bars`
 
 ## 2026-05-12 | Claude 사용량 탭 추가 (CSV → PC HTTP → ESP 폴링)
 
@@ -244,7 +244,7 @@ source: https://github.com/coport-uni/CommonClaude/tree/feat/c-language-support 
 - [x] `idf.py build` 영향 없음 확인 — CLAUDE.md/.clang-format만 수정, 빌드 훅 트리거 패턴(`main/**`, `CMakeLists.txt`, `sdkconfig.defaults`, `idf_component.yml`) 미해당
 - [x] GitHub Issue 생성: https://github.com/coport-uni/ESP32S3WebMonitor/issues/7
 - [x] `.claude/branch_CLAUDE.md`, `.claude/branch_clang_format.txt` 임시 파일 삭제
-- [ ] 커밋 + push
+- [x] 커밋 + push: `e960e5f chore: add .clang-format with LLVM base + 80-col / 4-space rules` (Closes #7). CLAUDE.md §2 MIT 본문 교체 및 §15~§21 신설은 실제 파일 반영 안 됨 — 후속 작업으로 분리 필요
 
 ## 2026-05-20 | VSCode ESP-IDF 확장의 stale OpenOCD 시리얼 캐시 정리
 
@@ -288,7 +288,7 @@ source: https://github.com/coport-uni/CommonClaude/tree/feat/c-language-support 
 - [x] 작업 즉시 실행으로 동작 검증 — pythonw PID 24348, localhost:8765 + LAN IP 192.168.1.16:8765 둘 다 `200 OK` 4626 bytes, 로그 파일에 두 요청 모두 기록
 - [x] LearnedPatterns.md §5.11에 `pythonw.exe + sys.stdout=None` 함정 영구 등록
 - [x] GitHub Issue 생성: https://github.com/coport-uni/ESP32S3WebMonitor/issues/9
-- [ ] 커밋 + push
+- [x] 커밋 + push: `26014bd chore(host): auto-start claude_usage_server.py at Windows logon`
 
 ## 2026-05-21 | CLAUDE.md §2 컨벤션 감사 — HIGH + MEDIUM 위반 수정
 
@@ -413,4 +413,50 @@ examples/sy01b_firmware/
 - [x] `idf.py build` 워닝 0 통과 — `sy01b_client.bin` 0x130fb0 bytes, 60% 여유 (`.claude/last-sy01b-build.log`)
 - [x] `idf.py -p COM6 flash` 성공 — Hash verified, hard reset OK (`.claude/last-sy01b-flash.log`)
 - [x] GitHub Issue 생성: https://github.com/coport-uni/ESP32S3WebMonitor/issues/12
-- [ ] 커밋 + push
+- [x] 커밋 + push — `d7ca736 feat(sy01b_firmware): scaffold standalone ESP-IDF project (Syringe Pump Client)` (Closes #12)
+
+## 2026-05-21 | sy01b_firmware 재빌드 (LVGL v9 포팅 + format-truncation 픽스)
+
+목적: 사용자가 `examples/sy01b_firmware/main/idf_component.yml`와 `main/CMakeLists.txt`를 첫 작업 이전 상태(`esp-box-3: "^4.0"` + `REQUIRES json`)로 되돌리고 `main/main.c`도 후속 편집 (APP_STATE_READY/BUSY/ERROR_FATAL 추가, snprintf banner 코드 추가). 재빌드 요청.
+
+### 빌드 실패 3단 (모두 픽스 완료)
+
+1. **dependency**: `esp-box-3 ^4.0`는 registry에 미공개 (latest 3.2.0) + `json` 컴포넌트는 IDF v6.0에서 삭제 → `^3.0.1` + `espressif/cjson ^1.7.18` 추가 + `REQUIRES json` 제거 (동일 픽스 d7ca736에서 적용됐던 것, 사용자 revert 이후 재적용)
+2. **format-truncation**: `main/main.c:87` `snprintf(banner[64], "%s", error_msg[128])` → GCC 15 `-Werror=format-truncation`로 차단. precision specifier `%.*s` + `(int)(sizeof(banner)-1)`로 명시적 truncate
+3. **LVGL v8→v9 API**: `main/ui.c`가 v8 API 사용 (`lv_msgbox_create(parent, title, txt, btns, close)`, `lv_msgbox_get_active_btn_text`, `lv_spinner_create(parent, time, arc)`) — esp-box-3 v3.x가 LVGL v9 가져옴. msgbox/spinner 모두 v9 API(`lv_msgbox_create(parent)` + `add_title/add_text/add_footer_button`, `lv_spinner_set_anim_params`)로 포팅, per-footer-button `LV_EVENT_CLICKED` 콜백으로 v8의 `LV_EVENT_VALUE_CHANGED` + `get_active_btn_text` 패턴 대체
+
+### 작업 항목
+
+- [x] `main/idf_component.yml`: `esp-box-3 ^4.0` → `^3.0.1` + `espressif/cjson ^1.7.18` 추가
+- [x] `main/CMakeLists.txt`: `REQUIRES json` 제거 (cjson은 managed component, 자동 include)
+- [x] `main/main.c:87`: `snprintf(banner, ..., "%s", error_msg)` → `"%.*s"` + precision으로 64바이트 truncate 명시
+- [x] `main/ui.c` Prime modal (197-223): v8 `lv_msgbox_create(NULL, title, msg, btns, false)` + `LV_EVENT_VALUE_CHANGED` 단일 콜백 → v9 `lv_msgbox_create(NULL)` + `add_title/add_text/add_footer_button` + per-button `LV_EVENT_CLICKED` 콜백 2개 (`prime_start_cb`/`prime_cancel_cb`). `prime_confirm_cb` 삭제
+- [x] `main/ui.c` Spinner (238): v8 `lv_spinner_create(parent, 1000, 60)` → v9 `lv_spinner_create(parent)` + `lv_spinner_set_anim_params(sp, 1000, 60)`
+- [x] `main/ui.c` Error modal (436-488): `modal_event_cb` 삭제, `modal_close()` 헬퍼 + `modal_retry_cb`/`modal_reinit_cb`/`modal_dismiss_cb` 3개로 분리. `ui_show_error_modal`에서 fatal/recover에 따라 다른 footer button 조합으로 build
+- [x] `idf.py build` warning 0 — `sy01b_client.bin` 0x134d50 bytes, 3 MB factory partition에서 60% 여유
+- [x] `idf.py -p COM6 flash` — Hash verified, hard reset OK
+- [x] 커밋 + push: `3ffa5a2 fix(sy01b_firmware): port UI to LVGL v9 + format-truncation fix` (Refs #12)
+
+## 2026-05-28 | DeviceChange.ps1 — VSCode ESP-IDF 캐시 시리얼 정리 스크립트화 (see LP §5.10)
+
+목적: LP §5.10에 기록된 "보드 교체 시 VSCode ESP-IDF 확장이 `openocd.usbAdapterSerial`을 캐싱해 OpenOCD가 실패" 픽스 절차를 매번 손으로 따라가지 않도록 재사용 가능한 PS1 스크립트로 굳힌다.
+
+기존 초안(`DeviceChange.ps1`)은 LP에서 그대로 복사한 7줄짜리로 `<workspaceHash>` placeholder를 매번 수동 치환해야 했음.
+
+### 개선 사항
+
+- workspaceHash 자동 탐지: `%APPDATA%\Code\User\workspaceStorage\*\workspace.json`의 `folder` URI를 `-WorkspacePath`(기본값: `$PSScriptRoot`)와 매칭
+- VSCode 종료 안전화: `Get-Process Code` 있을 때만 종료 + 1초 대기, `-NoStopCode`로 옵트아웃
+- `state.vscdb.bak-yyyyMMdd-HHmmss` 백업
+- Python 인라인 `-c` 따옴표 지옥 제거 → temp `.py` 파일에 here-string으로 작성 후 실행, `finally`로 정리
+- 멱등성: 키 없거나 JSON 항목 없으면 `[skip]` 후 종료
+- `-AllWorkspaces`로 모든 워크스페이스 일괄 처리
+- `[before]` 로그로 제거 직전 캐싱된 MAC 출력
+
+### 작업 항목
+
+- [x] `DeviceChange.ps1` 재작성 — workspaceHash 자동 탐지, 백업/로그/멱등성 추가
+- [x] PowerShell 파서로 syntax 검증 (no parse errors)
+- [x] 사용자 실기기 검증 — VSCode에서 OpenOCD 정상 동작 ✅
+- [x] GitHub Issue 생성: https://github.com/coport-uni/ESP32S3WebMonitor/issues/13
+- [x] 커밋 + push: `462589e tools: make DeviceChange.ps1 reusable (auto workspaceHash, backup, idempotent)` (Closes #13)
