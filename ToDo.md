@@ -537,4 +537,4 @@ GPIO 충돌 확인:
 - [x] [main/ui.c](main/ui.c) `rebuild_tabview()`에서 `lv_tabview_add_tab`에 넘기는 라벨을 첫 4글자로 축약. 명명 상수 `TAB_LABEL_LEN` 사용 (no magic number). → [main/ui.c:15](main/ui.c#L15), [main/ui.c:375-386](main/ui.c#L375-L386) snprintf `%.*s`.
 - [x] 토폴로지 비교/탭 콘텐츠용 `host_name`은 전체 이름 그대로 유지 (첫 4글자가 같은 서로 다른 PC가 같은 탭으로 오인되지 않도록). → `strncpy(host_name, name, ...)` 전체 이름 유지, `topology_changed()` 비교도 전체 이름 기준.
 - [x] `idf.py build` 통과 + 내 파일 경고 0 확인. → `build/my_box3_sensor.bin` 0x13be20 B, 16% free.
-- [ ] GitHub Issue 생성 + 커밋/푸시. → Issue [#16](https://github.com/coport-uni/ESP32S3WebMonitor/issues/16) 생성 완료, 커밋/푸시 대기.
+- [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#16](https://github.com/coport-uni/ESP32S3WebMonitor/issues/16) (`Closes #16`으로 자동 종료), commit `5df017f`, pushed to `origin/main`.
