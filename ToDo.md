@@ -538,3 +538,14 @@ GPIO 충돌 확인:
 - [x] 토폴로지 비교/탭 콘텐츠용 `host_name`은 전체 이름 그대로 유지 (첫 4글자가 같은 서로 다른 PC가 같은 탭으로 오인되지 않도록). → `strncpy(host_name, name, ...)` 전체 이름 유지, `topology_changed()` 비교도 전체 이름 기준.
 - [x] `idf.py build` 통과 + 내 파일 경고 0 확인. → `build/my_box3_sensor.bin` 0x13be20 B, 16% free.
 - [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#16](https://github.com/coport-uni/ESP32S3WebMonitor/issues/16) (`Closes #16`으로 자동 종료), commit `5df017f`, pushed to `origin/main`.
+
+## 2026-06-04 | Claude 사용량 CSV 파싱 실패 수정 (파일이 8KB 초과)
+
+원인: 서버가 내보내는 워크스페이스 루트 `ClaudeUsage.csv`가 9288 B로 증가, 펌웨어 `BUF_MAX`(8192 B)를 초과. 응답이 ~8128 B(청크 경계)에서 잘려 마지막 줄이 행 중간에서 끊김 → `parse_csv_latest()`가 col_count<4로 false → `W claude_usage: CSV parse failed (header only?) len=8128`. 장치는 마지막 1행만 필요하므로 전체 파일 전송이 근본 문제. 결정: 둘 다 적용.
+
+- [x] 서버 [claude_usage_server.py](claude_usage_server.py) `do_GET`: 전체 파일 대신 헤더+마지막 비어있지 않은 행만 전송 (응답 ~350 B 고정, 파일 크기 무관). BOM은 utf-8-sig로 제거. → 실제 CSV로 검증 시 196 B, BOM 제거 확인.
+- [x] 펌웨어 [main/claude_usage.c](main/claude_usage.c) `BUF_MAX` 8192 → 32KB 상향 (방어용 여유). → [claude_usage.c:22-26](main/claude_usage.c#L22-L26).
+- [x] `idf.py build` 통과 + 내 파일 경고 0. → `build/my_box3_sensor.bin` 0x13be20 B, 16% free.
+- [ ] 사용자: pythonw Task Scheduler 서버 재시작 필요(스크립트 변경 반영). 별도 호스트에서 `curl`로 헤더+1행만 오는지 확인 (LP §5.9). — 사용자 확인 대기
+- [x] LearnedPatterns에 "성장하는 CSV가 BUF_MAX 초과 → 서버에서 tail만 전송" 항목 추가. → LP §2.3.
+- [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#17](https://github.com/coport-uni/ESP32S3WebMonitor/issues/17), 커밋/푸시 진행.

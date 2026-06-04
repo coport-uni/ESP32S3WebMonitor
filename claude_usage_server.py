@@ -39,10 +39,24 @@ class CsvHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
             return
         try:
-            data = self.csv_path.read_bytes()
+            text = self.csv_path.read_text(encoding="utf-8-sig")
         except FileNotFoundError:
             self.send_error(404, f"{self.csv_path} not found")
             return
+        # The ESP only renders the latest row, so send just the header plus
+        # the last non-empty line instead of the whole file. This keeps the
+        # response bounded (~350 B) however large the CSV grows; the full
+        # file had crossed the firmware's 8 KB download buffer, truncating
+        # the newest row mid-line and breaking the parser. utf-8-sig strips
+        # the BOM so the re-encoded payload is clean UTF-8.
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        if len(lines) >= 2:
+            payload = lines[0] + "\n" + lines[-1] + "\n"
+        elif lines:
+            payload = lines[0] + "\n"
+        else:
+            payload = ""
+        data = payload.encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/csv; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))

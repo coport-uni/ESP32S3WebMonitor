@@ -28,6 +28,13 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 - **Fix**: Always capture at least 5–10 s of serial output for sensor diagnostics, covering multiple polling cycles.
 - **Rule**: For sensor_hub / sensor-polling debugging, capture monitor output for `min_delay × 3` minimum, never just the boot banner. (from ToDo: 2026-05-11 마이크/AHT30 추가 진단)
 
+### 2.3 An append-only data file outgrows the ESP download buffer → response truncated mid-row
+
+- **Problem**: `W claude_usage: CSV parse failed (header only?) len=8128` started appearing. `ClaudeUsage.csv` had grown to 9288 B (one row appended per poll).
+- **Cause**: `claude_usage.c` `BUF_MAX` capped the HTTP response buffer at 8192 B. `buf_ensure()` stops doubling at the cap, so the body was truncated at ~8128 B (a TCP/chunk boundary). The cut fell mid-row, leaving a final line with `col_count < 4`; `parse_csv_latest()` rejected it. The misleading "(header only?)" text made it look like a missing-data problem, not a size problem. The device only ever needs the *last* row, yet it was downloading the entire ever-growing file.
+- **Fix**: Two-pronged. (1) Server `claude_usage_server.py` `do_GET` now returns only `header + last non-empty line` (~200 B, bounded forever) using `read_text(encoding="utf-8-sig")` to drop the BOM. (2) Firmware `BUF_MAX` raised 8192 → 32 KB as defensive headroom against a misconfigured server.
+- **Rule**: When an ESP polls an append-only file it only reads the tail of, bound the payload at the *source* (serve just the needed rows) rather than sizing the device buffer to a file that grows without limit. A parse failure whose `len` sits just under a power-of-two buffer cap is a truncation tell, not a data tell. (from ToDo: 2026-06-04 Claude 사용량 CSV 파싱 실패 수정)
+
 ---
 
 ## §3. Library Quirks

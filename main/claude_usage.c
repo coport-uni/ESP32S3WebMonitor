@@ -20,7 +20,10 @@
 static const char *TAG = "claude_usage";
 
 #define BUF_INITIAL        1024
-#define BUF_MAX            8192
+/* Defensive headroom: the server now sends only the header + latest row
+ * (~350 B), but keep a generous cap so a misconfigured server that returns
+ * the whole growing CSV does not silently truncate the body mid-row. */
+#define BUF_MAX            (32 * 1024)
 #define HTTP_TIMEOUT_MS    6000
 #define TS_DST_CAP         24
 
