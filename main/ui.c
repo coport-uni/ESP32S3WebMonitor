@@ -12,6 +12,7 @@
 static const char *TAG = "ui";
 
 #define HOST_NAME_MAX_LEN        32
+#define TAB_LABEL_LEN            4   /* host tab bar shows first N chars only */
 #define UI_LOCK_MS               50
 #define CLAUDE_TS_CAP            24
 #define CLAUDE_MSG_CAP           40
@@ -374,7 +375,13 @@ static void rebuild_tabview(const ui_beszel_host_t *hosts, int count)
     }
     for (int i = 0; i < n; i++) {
         const char *name = hosts[i].name ? hosts[i].name : "?";
-        lv_obj_t *tab = lv_tabview_add_tab(s_tabview, name);
+        /* The tab bar only shows the first TAB_LABEL_LEN chars so several
+         * PCs fit across the 320px bar. The full name still lives in
+         * host_name for topology comparison, so two PCs sharing a 4-char
+         * prefix are not mistaken for one another. */
+        char label[TAB_LABEL_LEN + 1];
+        snprintf(label, sizeof(label), "%.*s", TAB_LABEL_LEN, name);
+        lv_obj_t *tab = lv_tabview_add_tab(s_tabview, label);
         build_host_tab(tab, &s_host_ui[i]);
         strncpy(s_host_ui[i].host_name, name,
                 sizeof(s_host_ui[i].host_name) - 1);

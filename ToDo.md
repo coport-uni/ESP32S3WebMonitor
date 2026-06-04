@@ -529,3 +529,12 @@ GPIO 충돌 확인:
 - [x] `README.md` Common pitfalls에 "GPIO/LEDC 할당 시 boot panic" 경고 추가, LP §4.2 링크 ([README.md:272](README.md#L272)).
 - [x] `LearnedPatterns.md` §4.2 신규: 핀 할당 전 datasheet → BSP grep → project grep 3단계 체크, 결과를 ToDo에 기록할 것.
 - [x] 커밋 + 푸시. → commit `c8960ea`, pushed to `origin/main`.
+
+## 2026-06-04 | 탭 라벨을 PC 이름 첫 4글자로 축약
+
+명령 검증 — What: tabview의 호스트 탭 라벨(탭 바에 보이는 텍스트). How: 호스트 이름 전체 대신 첫 4글자만 표시. Why: Beszel에 PC 2대를 추가 연결해 호스트 수가 늘면서 320px 탭 바가 좁아짐. 참고 자료: 기존 [main/ui.c](main/ui.c) `rebuild_tabview()` (라벨 생성), [main/ui.h](main/ui.h) 호스트 구조체.
+
+- [x] [main/ui.c](main/ui.c) `rebuild_tabview()`에서 `lv_tabview_add_tab`에 넘기는 라벨을 첫 4글자로 축약. 명명 상수 `TAB_LABEL_LEN` 사용 (no magic number). → [main/ui.c:15](main/ui.c#L15), [main/ui.c:375-386](main/ui.c#L375-L386) snprintf `%.*s`.
+- [x] 토폴로지 비교/탭 콘텐츠용 `host_name`은 전체 이름 그대로 유지 (첫 4글자가 같은 서로 다른 PC가 같은 탭으로 오인되지 않도록). → `strncpy(host_name, name, ...)` 전체 이름 유지, `topology_changed()` 비교도 전체 이름 기준.
+- [x] `idf.py build` 통과 + 내 파일 경고 0 확인. → `build/my_box3_sensor.bin` 0x13be20 B, 16% free.
+- [ ] GitHub Issue 생성 + 커밋/푸시. → Issue [#16](https://github.com/coport-uni/ESP32S3WebMonitor/issues/16) 생성 완료, 커밋/푸시 대기.
