@@ -109,6 +109,13 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 - **Fix**: Use `i2c_master_bus_handle_t bus = bsp_i2c_get_handle();` then `icm42670_create(bus, ICM42670_I2C_ADDRESS, &handle)`.
 - **Rule**: Before calling any `managed_components/` function, open its `.h` and confirm the real signature (project CLAUDE.md §7 Research Before Coding). Memory of similar APIs is unreliable. (from CLAUDE.md prior incident; reinforced 2026-05-11)
 
+### 3.11 LVGL 9 dropped `LV_MEM_CUSTOM` / `LV_MEMCPY_MEMSET_STD` Kconfig symbols
+
+- **Problem**: A fresh project that copied `sdkconfig.defaults` from an older example built with `warning: unknown kconfig symbol 'LV_MEM_CUSTOM' assigned to 'y'` (and `LV_MEMCPY_MEMSET_STD`), violating the zero-warning rule.
+- **Cause**: Those were LVGL 8-era Kconfig options. `espressif/esp-box-3 ^3.0.1` pulls LVGL 9.x, where memory management was reworked (`LV_USE_STDLIB_MALLOC`, etc.) and the old symbols no longer exist; esp_lvgl_port configures the heap. The assignments are dead no-ops that only emit a parse warning. `CONFIG_LV_USE_FLOAT` is still valid in LVGL 9.
+- **Fix**: Remove the two lines from `sdkconfig.defaults`, then delete the generated `sdkconfig` (or `reconfigure`) so the warning clears. Behavior is unchanged.
+- **Rule**: When copying a `sdkconfig.defaults` between projects, expect stale LVGL/Kconfig symbols; a clean build means *zero* `unknown kconfig symbol` warnings, not just zero compiler warnings. (from ToDo: 2026-06-18 examples/smart_plug standalone app)
+
 ---
 
 ## §4. Workflow Lessons
