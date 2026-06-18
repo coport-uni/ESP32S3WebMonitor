@@ -549,3 +549,53 @@ GPIO 충돌 확인:
 - [ ] 사용자: pythonw Task Scheduler 서버 재시작 필요(스크립트 변경 반영). 별도 호스트에서 `curl`로 헤더+1행만 오는지 확인 (LP §5.9). — 사용자 확인 대기
 - [x] LearnedPatterns에 "성장하는 CSV가 BUF_MAX 초과 → 서버에서 tail만 전송" 항목 추가. → LP §2.3.
 - [x] GitHub Issue 생성 + 커밋/푸시. → Issue [#17](https://github.com/coport-uni/ESP32S3WebMonitor/issues/17), 커밋/푸시 진행.
+
+## 2026-06-18 | 스마트 플러그 제어 탭 추가 (FastAPI 192.168.1.129:17046)
+
+명령 검증 — What: ESP32-S3-BOX-3에서 LAN의 FastAPI 스마트플러그 서버(`http://192.168.1.129:17046`)에 접근해 각 플러그의 on/off 상태·소비전력(W)을 보고, 화면 터치 버튼으로 on/off/toggle 제어. How: [main/beszel.c](main/beszel.c)와 동일한 `esp_http_client` + cJSON 폴링 패턴으로 신규 `smart_plug` 모듈 작성 + 전용 LVGL "Plugs" 탭. Why: 사용자 요청 — 플러그 상태 조회 + 스위치 제어. 참고: [esp32-integration.md](esp32-integration.md)(API 레퍼런스), 기존 [main/beszel.c](main/beszel.c)·[main/ui.c](main/ui.c) 패턴.
+
+사용자 결정 (AskUserQuestion):
+- 제어 UX: **플러그별 터치 버튼**(ON / OFF / TOGGLE) — 전용 Plugs 탭
+- 플러그 목록: **부팅 시 `GET /plugs` 자동 디스커버리**(하드코딩 안 함)
+- 위치: **root `main/`**(활성 펌웨어)
+
+설계 메모:
+- 제어 POST는 실물 플러그 접속으로 ~1–3s 소요 → LVGL 터치 콜백에서 직접 HTTP 금지. 콜백은 FreeRTOS 큐로 `{plug_idx, action}` 명령만 전달하고, `smart_plug` 태스크가 UI 스레드 밖에서 POST 수행(UI/WDT 블로킹 방지).
+- 폴링: 명령 큐 수신 타임아웃 = poll interval. 명령 도착 시 즉시 처리(POST + 해당 플러그 상태 갱신), 타임아웃 시 전체 플러그 `GET /plugs/{name}`(is_on) + `/energy`(power_w). doc의 "serialize per plug, ~1–3s/call, 10s timeout" 준수.
+- cJSON은 `espressif/cjson` managed component로 자동 포함(REQUIRES 추가 불필요, beszel.c와 동일). (see LP §3.7)
+- 전력값은 LVGL sprintf `%f` 의존 회피 위해 stdio `snprintf("%.1f W")`로 포맷. (see LP §3.1)
+- Plugs 탭은 Claude 탭처럼 tabview rebuild 시 항상 재생성(`append_plugs_tab`) + 캐시 데이터 재적용.
+- 신규 Kconfig 키는 기존 `sdkconfig`에 없으므로 빌드 시 default(`192.168.1.129:17046`)가 자동 반영됨(신규 키는 default 적용; LP §2.1은 *기존* 키 한정).
+
+### 작업 항목
+
+- [ ] `main/Kconfig.projbuild`: `menu "Smart plug tab"` 추가 — `SMART_PLUG_SERVER_URL`(기본 `http://192.168.1.129:17046`), `SMART_PLUG_POLL_INTERVAL_S`(기본 20, range 5~600), `SMART_PLUG_MAX_PLUGS`(기본 8, range 1~16)
+- [ ] `main/smart_plug.h/.c` 신규: 네트워크 대기 → `GET /plugs` 디스커버리 → 명령 큐 기반 제어 + 주기 폴링 태스크. esp_http_client + cJSON, mutex 보호 캐시.
+- [ ] `main/ui.h/.c`: `ui_plug_t`, `ui_plug_action_t`, `ui_plugs_replace/set_state/set_status/set_unavailable`, `ui_plugs_set_action_cb`. Plugs 탭 빌드(플러그별 상태닷+이름+ON/OFF+전력 + ON/OFF/TOGGLE 터치 버튼). 버튼 이벤트는 인덱스·액션을 user_data로 인코딩 후 등록된 action cb 호출(큐 post만).
+- [ ] `main/main.c`: `smart_plug_init()` 호출 추가(`claude_usage_init` 뒤).
+- [ ] `main/CMakeLists.txt`: SRCS에 `smart_plug.c` 추가.
+- [ ] `idf.py build` warning 0 통과 (LP §5.7 in-shell recipe, background).
+- [ ] 실기기 flash 후: Plugs 탭에서 plug1/plug2 상태·전력 표시 + 터치 버튼으로 on/off/toggle 동작 확인. — 사용자 확인 대기
+- [ ] GitHub Issue 생성 + 커밋/푸시.
+
+## 2026-06-18 | (방향 변경) 스마트 플러그를 탭이 아니라 별개 standalone 프로그램으로
+
+위 "스마트 플러그 제어 탭 추가" 항목 **대체**. 사용자 추가 지시: "탭이 아니라 별개의 프로그램으로 작업해줘". 기존 Beszel 펌웨어(root `main/`)의 탭으로 통합하지 않고, examples/의 standalone ESP-IDF 프로젝트 컨벤션(server_monitor / sensor_example / sy01b_firmware, 2026-05-21)에 따라 신규 프로젝트 `examples/smart_plug/`로 작성한다. UI는 탭이 아니라 전체 화면 플러그 제어 패널.
+
+사용자 결정 유지: 터치 버튼(ON/OFF/TOGGLE) 제어 + `GET /plugs` 자동 디스커버리. **변경**: 위치 = `examples/smart_plug/`(root main/ 아님).
+
+### 작업 항목
+
+- [x] `examples/smart_plug/CMakeLists.txt` + `sdkconfig.defaults` + `README.md`. → LVGL9에서 제거된 `LV_MEM_CUSTOM`/`LV_MEMCPY_MEMSET_STD` 2줄은 빼서 빌드 워닝 0.
+- [x] `examples/smart_plug/main/CMakeLists.txt` + `idf_component.yml`(esp-box-3 ^3.0.1 + cjson ^1.7.18).
+- [x] `main/Kconfig.projbuild`: SMART_PLUG_WIFI_SSID/PASSWORD, SMART_PLUG_SERVER_URL(기본 `http://192.168.1.129:17046`), SMART_PLUG_POLL_INTERVAL_S(20), SMART_PLUG_MAX_PLUGS(8).
+- [x] `main/network.c/.h`: server_monitor에서 복사, config 키를 `CONFIG_SMART_PLUG_WIFI_*`로 변경.
+- [x] `main/smart_plug.c/.h`: `GET /plugs` 디스커버리 + 명령 큐 + 주기 폴링(state+energy) + POST on/off/toggle. esp_http_client + cJSON.
+- [x] `main/ui.c/.h`: 전체 화면 플러그 제어 UI(헤더 status + 스크롤 카드 리스트, 카드별 상태닷/이름/ON·OFF·전력 + ON/OFF/TOGGLE 터치 버튼). 버튼 이벤트→등록된 action cb→큐 post(HTTP는 UI 스레드 밖).
+- [x] `main/main.c`: bsp_i2c_init → display_start → backlight → ui_create(lock) → network_init → smart_plug_init.
+- [x] `idf.py build` warning 0 통과 — `smart_plug.bin` 0xdc910 B, 41% free (`.claude/last-smartplug-build.log`).
+- [x] 멀티에이전트 adversarial review(4 dimension): 5건 제기 → 2건 confirmed(둘 다 poll_all의 per-plug publish + 6KB 스택 압박). 적용: publish_to_ui를 폴 루프 밖에서 1회 호출, publish 버퍼 static화, task 스택 6144→8192. cJSON NULL-deref 주장 3건은 dismissed(cJSON 접근자가 NULL-safe, beszel.c와 동일 관용).
+- [x] 후속 요청 반영: (1) **TOGGLE 버튼 제거** → ON/OFF만 (`ui_plug_action_t`에서 TOGGLE 삭제, do_action verb on/off, 버튼 2개 레이아웃, user_data stride 2). (2) **전력 대기 표시** `power_pending` 추가 — 스위치 직후/에너지 일시 실패 시 `retrieving...`(노랑), 값 도착 시 `X.X W`, 오프라인/미터없음 `--`.
+- [x] WiFi 자격증명: root Beszel `sdkconfig`의 SSID/PW를 `examples/smart_plug/sdkconfig`(gitignored)에 복제(같은 보드·망). server URL은 Kconfig 기본값 `http://192.168.1.129:17046`.
+- [x] 실기기 flash(COM14) + 시리얼 검증: `got IP 192.168.1.103`, `discovered 2 plug(s)`, 터치 `action plug1/on -> ON` 확인. (최초엔 서버 미기동으로 `ECONNREFUSED`였고 PC에서도 동일 확인 → 사용자 서버 기동 후 정상.) 화면 `retrieving...` 표기는 사용자 육안 확인 대기.
+- [x] GitHub Issue #18 업데이트(제목/코멘트) + 커밋/푸시.

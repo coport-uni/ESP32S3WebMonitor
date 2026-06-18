@@ -1,0 +1,43 @@
+menu "Smart plug client"
+
+config SMART_PLUG_WIFI_SSID
+    string "WiFi SSID"
+    default ""
+    help
+        WPA2-Personal SSID. Leave empty to skip WiFi bring-up; the
+        screen will show a "configure WiFi" message.
+
+config SMART_PLUG_WIFI_PASSWORD
+    string "WiFi password"
+    default ""
+    help
+        WPA2-Personal passphrase. Stored in the local sdkconfig only.
+
+config SMART_PLUG_SERVER_URL
+    string "Smart plug API base URL"
+    default "http://192.168.1.129:17046"
+    help
+        Base URL of the FastAPI smart-plug server. Include scheme and
+        port; a trailing slash is optional. See esp32-integration.md for
+        the API reference. The ESP32 talks plain HTTP/JSON — no TP-Link
+        account or library is needed on the device.
+
+config SMART_PLUG_POLL_INTERVAL_S
+    int "Poll interval (seconds)"
+    default 20
+    range 5 600
+    help
+        How often to refresh every plug's on/off state and power. Each
+        call contacts the physical plug (~1-3 s), so keep this generous;
+        on-screen button presses are handled immediately regardless of
+        this interval.
+
+config SMART_PLUG_MAX_PLUGS
+    int "Max plugs"
+    default 8
+    range 1 16
+    help
+        Upper bound on the number of plugs discovered from GET /plugs
+        that are cached and shown on screen.
+
+endmenu
