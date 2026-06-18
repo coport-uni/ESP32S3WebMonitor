@@ -598,4 +598,4 @@ GPIO 충돌 확인:
 - [x] 후속 요청 반영: (1) **TOGGLE 버튼 제거** → ON/OFF만 (`ui_plug_action_t`에서 TOGGLE 삭제, do_action verb on/off, 버튼 2개 레이아웃, user_data stride 2). (2) **전력 대기 표시** `power_pending` 추가 — 스위치 직후/에너지 일시 실패 시 `retrieving...`(노랑), 값 도착 시 `X.X W`, 오프라인/미터없음 `--`.
 - [x] WiFi 자격증명: root Beszel `sdkconfig`의 SSID/PW를 `examples/smart_plug/sdkconfig`(gitignored)에 복제(같은 보드·망). server URL은 Kconfig 기본값 `http://192.168.1.129:17046`.
 - [x] 실기기 flash(COM14) + 시리얼 검증: `got IP 192.168.1.103`, `discovered 2 plug(s)`, 터치 `action plug1/on -> ON` 확인. (최초엔 서버 미기동으로 `ECONNREFUSED`였고 PC에서도 동일 확인 → 사용자 서버 기동 후 정상.) 화면 `retrieving...` 표기는 사용자 육안 확인 대기.
-- [x] GitHub Issue #18 업데이트(제목/코멘트) + 커밋/푸시.
+- [x] GitHub Issue #18 업데이트(제목/코멘트) + 커밋/푸시 → `e84a60b feat(smart_plug): standalone Tapo plug-control app (examples/smart_plug)`, pushed to `origin/main`. Issue #18 close.
