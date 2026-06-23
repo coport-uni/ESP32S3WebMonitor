@@ -116,6 +116,13 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 - **Fix**: Remove the two lines from `sdkconfig.defaults`, then delete the generated `sdkconfig` (or `reconfigure`) so the warning clears. Behavior is unchanged.
 - **Rule**: When copying a `sdkconfig.defaults` between projects, expect stale LVGL/Kconfig symbols; a clean build means *zero* `unknown kconfig symbol` warnings, not just zero compiler warnings. (from ToDo: 2026-06-18 examples/smart_plug standalone app)
 
+### 3.12 LVGL 9 — revert a widget to its theme default color, don't hardcode it
+
+- **Problem**: Wanted a toggle button to turn red while ON and return to its normal look when OFF. Hardcoding an "off" hex makes Heat/Stir drift from the theme-default Temp/Speed buttons whenever the theme changes.
+- **Cause**: `lv_obj_set_style_bg_color()` installs a *local* style override that wins over the theme; there is no "set back to default color" call, and the real default is whatever the active theme computed.
+- **Fix**: Toggle on with `lv_obj_set_style_bg_color(btn, COLOR_ON, 0)`; toggle off with `lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_COLOR, 0)` to drop the override so the theme default re-applies. Reach a button's text label with `lv_obj_get_child(btn, 0)`.
+- **Rule**: To clear a per-widget style and fall back to the theme, remove the local style prop — never guess the default hex. (from ToDo: 2026-06-23 hotplate UI improvements)
+
 ---
 
 ## §4. Workflow Lessons
@@ -286,6 +293,22 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
    ```
    This also gives you a real log to diagnose future failures of a "silent" pythonw-launched service.
 - **Rule**: Any script invoked by `pythonw.exe` must either avoid `print` / `sys.stdout.write` entirely or redirect `sys.stdout`/`sys.stderr` to a file at startup. Test the script under `pythonw.exe` from a second host before declaring it deployable — a foreground `python.exe` smoke test does not exercise the failure mode. (from ToDo: 2026-05-21 claude_usage_server.py 부팅 시 자동 실행)
+
+### 5.12 A stray/zombie `openocd.exe` holds the WinUSB JTAG interface → VS Code JTAG flash fails with `got response: '-1', expecting: '0'`
+
+- **Problem**: VS Code JTAG flash failed with `Failed to flash the device (JTAG), please try again [got response: '-1', expecting: '0']`, yet UART/esptool flash to the **same board** over COM14 worked perfectly. Driver binding was correct (MI_02 on `WinUSB`, device "OK") and the workspaceStorage serial cache was clean (`openocd -f board/esp32s3-builtin.cfg` from a plain shell connected fine), so neither §5.4 (Zadig) nor §5.10 (stale serial) applied. The `'-1'` message is a generic extension wrapper around any nonzero OpenOCD exit, which hides the real cause.
+- **Cause**: A leftover `openocd.exe` (PID 34896, from a prior JTAG flash or debug session that never exited cleanly) was still holding MI_02 — the USB-JTAG interface — open exclusively via libusb. libusb allows only one process to claim an interface, so the flash command's freshly-spawned OpenOCD could not open the device and returned nonzero. UART is unaffected because esptool uses MI_00 (CDC/COM), a physically separate interface on the same composite device. This is the JTAG-interface analog of §5.8 (a stale `idf_monitor` holding the COM port → `PermissionError(13)`).
+- **Fix**: Diagnose and kill the stray process first, then verify the interface is free:
+   ```powershell
+   Get-Process openocd                       # find the zombie (note its PID)
+   Stop-Process -Id <pid> -Force
+   # Verify JTAG re-opens (connect + immediate exit, non-destructive):
+   $ocd = "C:\Espressif\tools\openocd-esp32\v0.12.0-esp32-20260304\openocd-esp32\bin\openocd.exe"
+   $s   = "C:\Espressif\tools\openocd-esp32\v0.12.0-esp32-20260304\openocd-esp32\share\openocd\scripts"
+   & $ocd -s $s -f "board/esp32s3-builtin.cfg" -c "init; exit"   # expect "Examination succeed", EXITCODE 0
+   ```
+   PowerShell 5.1 wraps OpenOCD's normal `Info :` stderr logging as a red `NativeCommandError` — that is **not** a failure; judge by the exit code and the `Examination succeed` lines, not the red text.
+- **Rule**: When VS Code JTAG flash fails with `got response: '-1', expecting: '0'` but UART flash to the same board works, the interface is most likely locked by another process — run `Get-Process openocd` FIRST. Diagnosis order for JTAG-flash failure on this host: (1) stray `openocd.exe` holding MI_02 (this entry), (2) MI_02 WinUSB binding (§5.4), (3) workspaceStorage stale serial filter (§5.10). Always let a debug session / OpenOCD exit cleanly (stop the debug session, don't just close the window) so it releases the interface. (from ToDo: 2026-06-23 JTAG 플래시 '-1' 오류 진단 (좀비 openocd))
 
 ---
 

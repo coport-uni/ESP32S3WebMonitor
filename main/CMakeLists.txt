@@ -4,9 +4,7 @@ idf_component_register(
         "ui.c"
         "buttons_check.c"
         "network.c"
-        "beszel.c"
-        "claude_usage.c"
-        "usage_led.c"
+        "hotplate_client.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash

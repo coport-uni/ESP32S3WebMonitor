@@ -4,28 +4,38 @@
 
 #include "bsp/esp-box-3.h"
 
+#include "sdkconfig.h"
+
 #include "ui.h"
 #include "buttons_check.h"
 #include "network.h"
-#include "beszel.h"
-#include "claude_usage.h"
-#include "usage_led.h"
+#include "hotplate_client.h"
 
 static const char *TAG = "main";
 
+/* The two physical buttons mirror the temperature +/- touch buttons, so
+ * the demo can drive the setpoint without the touchscreen. */
 static void on_config_pressed(void)
 {
-    ui_select_prev_tab();
+    hp_command_t cmd = {
+        .type = HP_CMD_TEMP_DELTA,
+        .arg = (float)CONFIG_HOTPLATE_TEMP_STEP_C,
+    };
+    hotplate_client_enqueue(&cmd);
 }
 
 static void on_mute_pressed(void)
 {
-    ui_select_next_tab();
+    hp_command_t cmd = {
+        .type = HP_CMD_TEMP_DELTA,
+        .arg = -(float)CONFIG_HOTPLATE_TEMP_STEP_C,
+    };
+    hotplate_client_enqueue(&cmd);
 }
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Beszel monitor starting");
+    ESP_LOGI(TAG, "Hotplate monitor starting");
 
     ESP_ERROR_CHECK(bsp_i2c_init());
     bsp_display_start();
@@ -42,9 +52,7 @@ void app_main(void)
     buttons_check_init(&btn_cbs);
 
     network_init();
-    beszel_init();
-    ESP_ERROR_CHECK(usage_led_init());
-    claude_usage_init();
+    ESP_ERROR_CHECK(hotplate_client_init());
 
     ESP_LOGI(TAG, "init complete");
 }

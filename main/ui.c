@@ -1,7 +1,6 @@
 #include "ui.h"
 
-#include <stdio.h>
-#include <string.h>
+#include <stdint.h>
 
 #include "esp_log.h"
 #include "bsp/esp-box-3.h"
@@ -9,64 +8,47 @@
 
 #include "sdkconfig.h"
 
+#include "hotplate_client.h"
+
 static const char *TAG = "ui";
 
-#define HOST_NAME_MAX_LEN        32
-#define TAB_LABEL_LEN            4   /* host tab bar shows first N chars only */
-#define UI_LOCK_MS               50
-#define CLAUDE_TS_CAP            24
-#define CLAUDE_MSG_CAP           40
+#define UI_LOCK_MS      50
 
-#define COLOR_ACCENT    lv_color_hex(0x00E5FF)
-#define COLOR_OK        lv_color_hex(0x06D6A0)
-#define COLOR_WARN      lv_color_hex(0xFFD166)
-#define COLOR_MUTED     lv_color_hex(0x9CA3AF)
 #define COLOR_BG        lv_color_hex(0x0A0E27)
-#define COLOR_BAR_BG    lv_color_hex(0x1F2937)
+#define COLOR_MUTED     lv_color_hex(0x9CA3AF)
+#define COLOR_OK        lv_color_hex(0x06D6A0)
 #define COLOR_PINK      lv_color_hex(0xEF476F)
+#define COLOR_ACCENT    lv_color_hex(0x00E5FF)
+#define COLOR_PENDING   lv_color_hex(0xFFD166)  /* amber: command in flight */
+#define COLOR_ON        lv_color_hex(0xE63946)  /* red: heater/motor active */
 
-typedef struct {
-    lv_obj_t *tab_content;
-    lv_obj_t *dot_status;
-    lv_obj_t *lbl_status_word;
-    lv_obj_t *lbl_uptime;
-    lv_obj_t *bar_cpu;
-    lv_obj_t *lbl_cpu_val;
-    lv_obj_t *bar_mem;
-    lv_obj_t *lbl_mem_val;
-    lv_obj_t *bar_gpu;
-    lv_obj_t *lbl_gpu_val;
-    lv_obj_t *bar_disk;
-    lv_obj_t *lbl_disk_val;
-    char      host_name[HOST_NAME_MAX_LEN];
-} host_ui_t;
+/* Identifies which control button fired the shared click handler. */
+typedef enum {
+    BTN_TEMP_DOWN,
+    BTN_TEMP_UP,
+    BTN_HEAT,
+    BTN_SPEED_DOWN,
+    BTN_SPEED_UP,
+    BTN_MOTOR,
+} btn_id_t;
 
-typedef struct {
-    lv_obj_t *tab_content;
-    lv_obj_t *lbl_timestamp;
-    lv_obj_t *bar_session;
-    lv_obj_t *lbl_session_val;
-    lv_obj_t *bar_week;
-    lv_obj_t *lbl_week_val;
-    lv_obj_t *lbl_reset;
-} claude_ui_t;
+static lv_obj_t *s_dot;
+static lv_obj_t *s_lbl_state;
+static lv_obj_t *s_lbl_age;
+static lv_obj_t *s_val_plate;
+static lv_obj_t *s_val_probe;
+static lv_obj_t *s_val_speed;
+static lv_obj_t *s_val_target;
+static lv_obj_t *s_lbl_status;
+static lv_obj_t *s_btn_heat;
+static lv_obj_t *s_btn_motor;
+static lv_obj_t *s_lbl_heat;
+static lv_obj_t *s_lbl_motor;
 
-static lv_obj_t   *s_tabview;
-static lv_obj_t   *s_lbl_status;
-static host_ui_t   s_host_ui[CONFIG_BESZEL_MAX_HOSTS];
-static int         s_host_ui_count;
-
-static claude_ui_t s_claude_ui;
-/* Claude data cached so that a tabview rebuild can re-render it without
- * waiting for the next poll. */
-static bool        s_claude_have_data;
-static bool        s_claude_show_placeholder;
-static int         s_claude_session_pct;
-static int         s_claude_week_pct;
-static int         s_claude_reset_h;
-static int         s_claude_reset_m;
-static char        s_claude_ts[CLAUDE_TS_CAP];
-static char        s_claude_msg[CLAUDE_MSG_CAP];
+/* Intended heater/motor state. The server exposes no run-state readback,
+ * so the toggle buttons track what the user last asked for. */
+static bool s_heat_on;
+static bool s_motor_on;
 
 #define UI_WITH_LOCK(BLOCK)                          \
     do {                                             \
@@ -76,325 +58,112 @@ static char        s_claude_msg[CLAUDE_MSG_CAP];
         }                                            \
     } while (0)
 
-/* ---------------------- helpers ---------------------- */
+/* ---------------------- control buttons ---------------------- */
 
-static int clamp_pct(int v)
+/* Paint a toggle button red while its function is on, or drop the local
+ * override so it falls back to the theme default when off. */
+static void set_toggle_color(lv_obj_t *btn, bool on)
 {
-    if (v < 0) {
-        return 0;
-    }
-    if (v > 100) {
-        return 100;
-    }
-    return v;
-}
-
-/* Cyan up to 70%, yellow 70-89%, pink at 90%+. Threshold change driven by
- * user preference — flag pressure on any resource (CPU/MEM/GPU/DISK). */
-static lv_color_t bar_color_for_pct(int pct)
-{
-    if (pct >= 90) {
-        return COLOR_PINK;
-    }
-    if (pct >= 70) {
-        return COLOR_WARN;
-    }
-    return COLOR_ACCENT;
-}
-
-static void format_uptime(uint32_t seconds, char *buf, size_t cap)
-{
-    unsigned d = (unsigned)(seconds / 86400);
-    unsigned h = (unsigned)((seconds % 86400) / 3600);
-    unsigned m = (unsigned)((seconds % 3600) / 60);
-    if (d > 0) {
-        snprintf(buf, cap, "Up %ud %uh", d, h);
-    } else if (h > 0) {
-        snprintf(buf, cap, "Up %uh %um", h, m);
+    if (on) {
+        lv_obj_set_style_bg_color(btn, COLOR_ON, 0);
     } else {
-        snprintf(buf, cap, "Up %um", m);
+        lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_COLOR, 0);
     }
 }
 
-/* ---------------------- per-host tab build ---------------------- */
-
-static void build_metric_row(lv_obj_t *tab, const char *label,
-                             int y, lv_obj_t **bar_out, lv_obj_t **val_out)
+/* Flag the connection indicator while a command is in flight. The next
+ * status fetch (ui_set_status / ui_set_offline) overwrites this. Runs in
+ * the LVGL task via the event callback, so it touches widgets directly. */
+static void show_pending(void)
 {
-    lv_obj_t *lbl = lv_label_create(tab);
-    lv_label_set_text(lbl, label);
-    lv_obj_set_style_text_color(lbl, COLOR_MUTED, 0);
-    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, y);
-
-    lv_obj_t *bar = lv_bar_create(tab);
-    lv_obj_set_size(bar, 200, 14);
-    lv_obj_align(bar, LV_ALIGN_TOP_LEFT, 40, y + 2);
-    lv_bar_set_range(bar, 0, 100);
-    lv_obj_set_style_bg_color(bar, COLOR_BAR_BG, 0);
-    lv_obj_set_style_bg_color(bar, COLOR_ACCENT, LV_PART_INDICATOR);
-    *bar_out = bar;
-
-    lv_obj_t *val = lv_label_create(tab);
-    lv_label_set_text(val, "--");
-    lv_obj_set_style_text_color(val, lv_color_black(), 0);
-    lv_obj_align(val, LV_ALIGN_TOP_LEFT, 246, y);
-    *val_out = val;
+    lv_obj_set_style_bg_color(s_dot, COLOR_PENDING, 0);
+    lv_label_set_text(s_lbl_state, "pending");
+    lv_obj_set_style_text_color(s_lbl_state, COLOR_PENDING, 0);
 }
 
-static void build_host_tab(lv_obj_t *tab, host_ui_t *ui)
+static void on_button(lv_event_t *e)
 {
-    memset(ui, 0, sizeof(*ui));
-    ui->tab_content = tab;
+    btn_id_t id = (btn_id_t)(intptr_t)lv_event_get_user_data(e);
+    hp_command_t cmd = { 0 };
 
-    ui->dot_status = lv_obj_create(tab);
-    lv_obj_set_size(ui->dot_status, 12, 12);
-    lv_obj_set_style_radius(ui->dot_status, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(ui->dot_status, 0, 0);
-    lv_obj_set_style_pad_all(ui->dot_status, 0, 0);
-    lv_obj_set_style_bg_color(ui->dot_status, COLOR_MUTED, 0);
-    lv_obj_align(ui->dot_status, LV_ALIGN_TOP_LEFT, 0, 4);
-    lv_obj_clear_flag(ui->dot_status, LV_OBJ_FLAG_SCROLLABLE);
-
-    ui->lbl_status_word = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_status_word, "--");
-    lv_obj_set_style_text_color(ui->lbl_status_word, COLOR_MUTED, 0);
-    lv_obj_align(ui->lbl_status_word, LV_ALIGN_TOP_LEFT, 20, 0);
-
-    ui->lbl_uptime = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_uptime, "");
-    lv_obj_set_style_text_color(ui->lbl_uptime, COLOR_MUTED, 0);
-    lv_obj_align(ui->lbl_uptime, LV_ALIGN_TOP_RIGHT, 0, 0);
-
-    build_metric_row(tab, "CPU",  30, &ui->bar_cpu,  &ui->lbl_cpu_val);
-    build_metric_row(tab, "MEM",  60, &ui->bar_mem,  &ui->lbl_mem_val);
-    build_metric_row(tab, "GPU",  90, &ui->bar_gpu,  &ui->lbl_gpu_val);
-    build_metric_row(tab, "DISK", 120, &ui->bar_disk, &ui->lbl_disk_val);
-}
-
-static void apply_host_data(host_ui_t *ui, const ui_beszel_host_t *h)
-{
-    int cpu  = clamp_pct(h->cpu_pct);
-    int mem  = clamp_pct(h->mem_pct);
-    int gpu  = clamp_pct(h->gpu_pct);
-    int disk = clamp_pct(h->disk_pct);
-
-    lv_obj_set_style_bg_color(ui->dot_status,
-                              h->up ? COLOR_OK : COLOR_PINK, 0);
-    lv_label_set_text(ui->lbl_status_word, h->up ? "UP" : "DOWN");
-    lv_obj_set_style_text_color(ui->lbl_status_word,
-                                h->up ? COLOR_OK : COLOR_PINK, 0);
-
-    char ub[32];
-    format_uptime(h->uptime_s, ub, sizeof(ub));
-    lv_label_set_text(ui->lbl_uptime, ub);
-
-    lv_obj_set_style_bg_color(ui->bar_cpu, bar_color_for_pct(cpu),
-                              LV_PART_INDICATOR);
-    lv_bar_set_value(ui->bar_cpu, cpu, LV_ANIM_OFF);
-    lv_label_set_text_fmt(ui->lbl_cpu_val, "%d%%", cpu);
-
-    lv_obj_set_style_bg_color(ui->bar_mem, bar_color_for_pct(mem),
-                              LV_PART_INDICATOR);
-    lv_bar_set_value(ui->bar_mem, mem, LV_ANIM_OFF);
-    lv_label_set_text_fmt(ui->lbl_mem_val, "%d%%", mem);
-
-    if (h->gpu_present) {
-        lv_obj_set_style_bg_color(ui->bar_gpu, bar_color_for_pct(gpu),
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_gpu, gpu, LV_ANIM_OFF);
-        lv_label_set_text_fmt(ui->lbl_gpu_val, "%d%%", gpu);
-    } else {
-        lv_obj_set_style_bg_color(ui->bar_gpu, COLOR_MUTED,
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_gpu, 0, LV_ANIM_OFF);
-        lv_label_set_text(ui->lbl_gpu_val, "N/A");
+    switch (id) {
+    case BTN_TEMP_DOWN:
+        cmd.type = HP_CMD_TEMP_DELTA;
+        cmd.arg = -(float)CONFIG_HOTPLATE_TEMP_STEP_C;
+        hotplate_client_enqueue(&cmd);
+        break;
+    case BTN_TEMP_UP:
+        cmd.type = HP_CMD_TEMP_DELTA;
+        cmd.arg = (float)CONFIG_HOTPLATE_TEMP_STEP_C;
+        hotplate_client_enqueue(&cmd);
+        break;
+    case BTN_SPEED_DOWN:
+        cmd.type = HP_CMD_SPEED_DELTA;
+        cmd.arg = -(float)CONFIG_HOTPLATE_SPEED_STEP_RPM;
+        hotplate_client_enqueue(&cmd);
+        break;
+    case BTN_SPEED_UP:
+        cmd.type = HP_CMD_SPEED_DELTA;
+        cmd.arg = (float)CONFIG_HOTPLATE_SPEED_STEP_RPM;
+        hotplate_client_enqueue(&cmd);
+        break;
+    case BTN_HEAT:
+        s_heat_on = !s_heat_on;
+        cmd.type = s_heat_on ? HP_CMD_HEATER_START : HP_CMD_HEATER_STOP;
+        hotplate_client_enqueue(&cmd);
+        lv_label_set_text_fmt(s_lbl_heat, "Heat\n%s",
+                              s_heat_on ? "ON" : "OFF");
+        set_toggle_color(s_btn_heat, s_heat_on);
+        break;
+    case BTN_MOTOR:
+        s_motor_on = !s_motor_on;
+        cmd.type = s_motor_on ? HP_CMD_MOTOR_START : HP_CMD_MOTOR_STOP;
+        hotplate_client_enqueue(&cmd);
+        lv_label_set_text_fmt(s_lbl_motor, "Stir\n%s",
+                              s_motor_on ? "ON" : "OFF");
+        set_toggle_color(s_btn_motor, s_motor_on);
+        break;
     }
 
-    lv_obj_set_style_bg_color(ui->bar_disk, bar_color_for_pct(disk),
-                              LV_PART_INDICATOR);
-    lv_bar_set_value(ui->bar_disk, disk, LV_ANIM_OFF);
-    lv_label_set_text_fmt(ui->lbl_disk_val, "%d%%", disk);
+    /* Every button enqueues a command; show that one is in flight. */
+    show_pending();
 }
 
-/* ---------------------- Claude tab build ---------------------- */
+/* ---------------------- builders ---------------------- */
 
-static void build_claude_tab(lv_obj_t *tab, claude_ui_t *ui)
-{
-    memset(ui, 0, sizeof(*ui));
-    ui->tab_content = tab;
-
-    /* Top: muted "Updated YYYY-MM-DD HH:MM" timestamp. */
-    ui->lbl_timestamp = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_timestamp, "waiting for CSV...");
-    lv_obj_set_style_text_color(ui->lbl_timestamp, COLOR_MUTED, 0);
-    lv_obj_align(ui->lbl_timestamp, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    /* SESSION row: label + bar + percent. Label is wider than the host
-     * labels ("CPU"/"MEM") so the bar starts further right. */
-    lv_obj_t *lbl_s = lv_label_create(tab);
-    lv_label_set_text(lbl_s, "SESSION");
-    lv_obj_set_style_text_color(lbl_s, COLOR_MUTED, 0);
-    lv_obj_align(lbl_s, LV_ALIGN_TOP_LEFT, 0, 30);
-
-    ui->bar_session = lv_bar_create(tab);
-    lv_obj_set_size(ui->bar_session, 170, 14);
-    lv_obj_align(ui->bar_session, LV_ALIGN_TOP_LEFT, 70, 32);
-    lv_bar_set_range(ui->bar_session, 0, 100);
-    lv_obj_set_style_bg_color(ui->bar_session, COLOR_BAR_BG, 0);
-    lv_obj_set_style_bg_color(ui->bar_session, COLOR_ACCENT,
-                              LV_PART_INDICATOR);
-
-    ui->lbl_session_val = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_session_val, "--");
-    lv_obj_set_style_text_color(ui->lbl_session_val, lv_color_black(), 0);
-    lv_obj_align(ui->lbl_session_val, LV_ALIGN_TOP_LEFT, 246, 30);
-
-    /* WEEK row. */
-    lv_obj_t *lbl_w = lv_label_create(tab);
-    lv_label_set_text(lbl_w, "WEEK");
-    lv_obj_set_style_text_color(lbl_w, COLOR_MUTED, 0);
-    lv_obj_align(lbl_w, LV_ALIGN_TOP_LEFT, 0, 60);
-
-    ui->bar_week = lv_bar_create(tab);
-    lv_obj_set_size(ui->bar_week, 170, 14);
-    lv_obj_align(ui->bar_week, LV_ALIGN_TOP_LEFT, 70, 62);
-    lv_bar_set_range(ui->bar_week, 0, 100);
-    lv_obj_set_style_bg_color(ui->bar_week, COLOR_BAR_BG, 0);
-    lv_obj_set_style_bg_color(ui->bar_week, COLOR_ACCENT,
-                              LV_PART_INDICATOR);
-
-    ui->lbl_week_val = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_week_val, "--");
-    lv_obj_set_style_text_color(ui->lbl_week_val, lv_color_black(), 0);
-    lv_obj_align(ui->lbl_week_val, LV_ALIGN_TOP_LEFT, 246, 60);
-
-    /* Reset-in row: prominent accent text, centered. */
-    ui->lbl_reset = lv_label_create(tab);
-    lv_label_set_text(ui->lbl_reset, "Reset in --");
-    lv_obj_set_style_text_color(ui->lbl_reset, COLOR_ACCENT, 0);
-    lv_obj_set_style_text_align(ui->lbl_reset, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(ui->lbl_reset, 300);
-    lv_obj_align(ui->lbl_reset, LV_ALIGN_TOP_LEFT, 10, 110);
-}
-
-static void apply_claude_data_widgets(claude_ui_t *ui)
-{
-    int s = clamp_pct(s_claude_session_pct);
-    int w = clamp_pct(s_claude_week_pct);
-
-    if (s_claude_show_placeholder) {
-        lv_label_set_text(ui->lbl_timestamp,
-                          s_claude_msg[0] ? s_claude_msg : "unavailable");
-        lv_obj_set_style_bg_color(ui->bar_session, COLOR_MUTED,
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_session, 0, LV_ANIM_OFF);
-        lv_label_set_text(ui->lbl_session_val, "--");
-
-        lv_obj_set_style_bg_color(ui->bar_week, COLOR_MUTED,
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_week, 0, LV_ANIM_OFF);
-        lv_label_set_text(ui->lbl_week_val, "--");
-
-        lv_obj_set_style_text_color(ui->lbl_reset, COLOR_MUTED, 0);
-        lv_label_set_text(ui->lbl_reset, "Reset in --");
-        return;
-    }
-
-    if (s_claude_have_data) {
-        lv_label_set_text_fmt(ui->lbl_timestamp, "Updated %s", s_claude_ts);
-
-        lv_obj_set_style_bg_color(ui->bar_session, bar_color_for_pct(s),
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_session, s, LV_ANIM_OFF);
-        lv_label_set_text_fmt(ui->lbl_session_val, "%d%%", s);
-
-        lv_obj_set_style_bg_color(ui->bar_week, bar_color_for_pct(w),
-                                  LV_PART_INDICATOR);
-        lv_bar_set_value(ui->bar_week, w, LV_ANIM_OFF);
-        lv_label_set_text_fmt(ui->lbl_week_val, "%d%%", w);
-
-        lv_obj_set_style_text_color(ui->lbl_reset, COLOR_ACCENT, 0);
-        lv_label_set_text_fmt(ui->lbl_reset, "Reset in %dh %02dm",
-                              s_claude_reset_h, s_claude_reset_m);
-    } else {
-        lv_label_set_text(ui->lbl_timestamp, "waiting for CSV...");
-        lv_label_set_text(ui->lbl_reset, "Reset in --");
-    }
-}
-
-/* ---------------------- tabview lifecycle ---------------------- */
-
-static bool topology_changed(const ui_beszel_host_t *hosts, int count)
-{
-    if (count != s_host_ui_count) {
-        return true;
-    }
-    for (int i = 0; i < count; i++) {
-        const char *new_name = hosts[i].name ? hosts[i].name : "";
-        if (strncmp(new_name, s_host_ui[i].host_name,
-                    sizeof(s_host_ui[i].host_name)) != 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void create_empty_tabview(void)
+static lv_obj_t *make_reading(const char *name, int y)
 {
     lv_obj_t *scr = lv_scr_act();
-    s_tabview = lv_tabview_create(scr);
-    lv_obj_set_size(s_tabview, 320, 220);
-    lv_obj_align(s_tabview, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_tabview_set_tab_bar_size(s_tabview, 30);
+
+    lv_obj_t *lbl = lv_label_create(scr);
+    lv_label_set_text(lbl, name);
+    lv_obj_set_style_text_color(lbl, COLOR_MUTED, 0);
+    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 4, y);
+
+    lv_obj_t *val = lv_label_create(scr);
+    lv_label_set_text(val, "--");
+    lv_obj_set_style_text_color(val, lv_color_white(), 0);
+    lv_obj_align(val, LV_ALIGN_TOP_LEFT, 78, y);
+    return val;
 }
 
-/* Append the always-present Claude tab and re-render whatever Claude
- * state we have cached. Used by rebuild_tabview and ui_create. */
-static void append_claude_tab(void)
+/* Returns the button object; its text label is the first child, reachable
+ * with lv_obj_get_child(btn, 0). */
+static lv_obj_t *make_button(const char *text, int x, int y, btn_id_t id)
 {
-    lv_obj_t *claude_tab = lv_tabview_add_tab(s_tabview, "Claude");
-    build_claude_tab(claude_tab, &s_claude_ui);
-    apply_claude_data_widgets(&s_claude_ui);
-}
+    lv_obj_t *scr = lv_scr_act();
 
-static void rebuild_tabview(const ui_beszel_host_t *hosts, int count)
-{
-    if (s_tabview) {
-        lv_obj_delete(s_tabview);
-        s_tabview = NULL;
-    }
-    memset(s_host_ui, 0, sizeof(s_host_ui));
-    s_host_ui_count = 0;
-    memset(&s_claude_ui, 0, sizeof(s_claude_ui));
+    lv_obj_t *btn = lv_button_create(scr);
+    lv_obj_set_size(btn, 100, 46);
+    lv_obj_align(btn, LV_ALIGN_TOP_LEFT, x, y);
+    lv_obj_add_event_cb(btn, on_button, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)id);
 
-    create_empty_tabview();
-
-    int n = count;
-    if (n > CONFIG_BESZEL_MAX_HOSTS) {
-        n = CONFIG_BESZEL_MAX_HOSTS;
-    }
-    for (int i = 0; i < n; i++) {
-        const char *name = hosts[i].name ? hosts[i].name : "?";
-        /* The tab bar only shows the first TAB_LABEL_LEN chars so several
-         * PCs fit across the 320px bar. The full name still lives in
-         * host_name for topology comparison, so two PCs sharing a 4-char
-         * prefix are not mistaken for one another. */
-        char label[TAB_LABEL_LEN + 1];
-        snprintf(label, sizeof(label), "%.*s", TAB_LABEL_LEN, name);
-        lv_obj_t *tab = lv_tabview_add_tab(s_tabview, label);
-        build_host_tab(tab, &s_host_ui[i]);
-        strncpy(s_host_ui[i].host_name, name,
-                sizeof(s_host_ui[i].host_name) - 1);
-    }
-    s_host_ui_count = n;
-
-    append_claude_tab();
-
-    /* Pull the status footer back above the tabview so it stays clickable
-     * (lv_obj_delete + create reset z-order). */
-    if (s_lbl_status) {
-        lv_obj_move_foreground(s_lbl_status);
-    }
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(lbl);
+    return btn;
 }
 
 /* ---------------------- public API ---------------------- */
@@ -404,9 +173,44 @@ void ui_create(void)
     lv_obj_t *scr = lv_scr_act();
     lv_obj_set_style_bg_color(scr, COLOR_BG, 0);
 
-    create_empty_tabview();
-    append_claude_tab();
+    /* Top: connection dot + word + reading age. */
+    s_dot = lv_obj_create(scr);
+    lv_obj_set_size(s_dot, 12, 12);
+    lv_obj_set_style_radius(s_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(s_dot, 0, 0);
+    lv_obj_set_style_pad_all(s_dot, 0, 0);
+    lv_obj_set_style_bg_color(s_dot, COLOR_MUTED, 0);
+    lv_obj_align(s_dot, LV_ALIGN_TOP_LEFT, 4, 5);
+    lv_obj_clear_flag(s_dot, LV_OBJ_FLAG_SCROLLABLE);
 
+    s_lbl_state = lv_label_create(scr);
+    lv_label_set_text(s_lbl_state, "starting");
+    lv_obj_set_style_text_color(s_lbl_state, COLOR_MUTED, 0);
+    lv_obj_align(s_lbl_state, LV_ALIGN_TOP_LEFT, 24, 2);
+
+    s_lbl_age = lv_label_create(scr);
+    lv_label_set_text(s_lbl_age, "");
+    lv_obj_set_style_text_color(s_lbl_age, COLOR_MUTED, 0);
+    lv_obj_align(s_lbl_age, LV_ALIGN_TOP_RIGHT, -4, 2);
+
+    /* Readings: plate and probe temperatures both get their own row. */
+    s_val_plate  = make_reading("Plate",  26);
+    s_val_probe  = make_reading("Probe",  48);
+    s_val_speed  = make_reading("Speed",  70);
+    s_val_target = make_reading("Target", 92);
+
+    /* Control buttons: 2 rows x 3 columns. */
+    make_button("Temp\n-",  6, 114, BTN_TEMP_DOWN);
+    make_button("Temp\n+", 110, 114, BTN_TEMP_UP);
+    s_btn_heat = make_button("Heat\nOFF", 214, 114, BTN_HEAT);
+    s_lbl_heat = lv_obj_get_child(s_btn_heat, 0);
+
+    make_button("Spd\n-",   6, 164, BTN_SPEED_DOWN);
+    make_button("Spd\n+",  110, 164, BTN_SPEED_UP);
+    s_btn_motor = make_button("Stir\nOFF", 214, 164, BTN_MOTOR);
+    s_lbl_motor = lv_obj_get_child(s_btn_motor, 0);
+
+    /* Footer status line. */
     s_lbl_status = lv_label_create(scr);
     lv_label_set_text(s_lbl_status, "starting...");
     lv_obj_set_style_text_color(s_lbl_status, COLOR_MUTED, 0);
@@ -417,137 +221,56 @@ void ui_create(void)
     ESP_LOGI(TAG, "ui ready");
 }
 
-void ui_beszel_replace_hosts(const ui_beszel_host_t *hosts, int count,
-                             int active_idx)
+void ui_set_status(const ui_status_t *st)
 {
-    if (!hosts || count < 0) {
+    if (!st) {
         return;
     }
     UI_WITH_LOCK({
-        if (topology_changed(hosts, count)) {
-            rebuild_tabview(hosts, count);
-        }
-        int n = count;
-        if (n > CONFIG_BESZEL_MAX_HOSTS) {
-            n = CONFIG_BESZEL_MAX_HOSTS;
-        }
-        for (int i = 0; i < n; i++) {
-            apply_host_data(&s_host_ui[i], &hosts[i]);
-        }
-        /* active_idx >= 0 forces a tab change; -1 means "leave whichever
-         * tab the user is on alone". */
-        if (active_idx >= 0 && s_tabview) {
-            uint32_t total = lv_tabview_get_tab_count(s_tabview);
-            if (total > 0) {
-                uint32_t idx = (uint32_t)active_idx;
-                if (idx >= total) {
-                    idx = total - 1;
-                }
-                lv_tabview_set_active(s_tabview, idx, LV_ANIM_OFF);
-            }
-        }
-    });
-}
+        lv_color_t c = st->connected ? COLOR_OK : COLOR_PINK;
+        lv_obj_set_style_bg_color(s_dot, c, 0);
+        lv_label_set_text(s_lbl_state,
+                          st->connected ? "online" : "device offline");
+        lv_obj_set_style_text_color(s_lbl_state, c, 0);
+        lv_label_set_text_fmt(s_lbl_age, "%ds", st->age_s);
 
-void ui_claude_set_data(const ui_claude_data_t *data)
-{
-    if (!data) {
-        return;
-    }
-    UI_WITH_LOCK({
-        s_claude_have_data = data->valid;
-        s_claude_show_placeholder = false;
-        s_claude_session_pct = data->session_pct;
-        s_claude_week_pct = data->week_all_pct;
-        s_claude_reset_h = data->reset_h;
-        s_claude_reset_m = data->reset_m;
-        if (data->timestamp) {
-            strncpy(s_claude_ts, data->timestamp, sizeof(s_claude_ts) - 1);
-            s_claude_ts[sizeof(s_claude_ts) - 1] = '\0';
+        if (st->connected) {
+            lv_label_set_text_fmt(s_val_plate, "%.1f C", st->plate_c);
+            if (st->probe_valid) {
+                lv_label_set_text_fmt(s_val_probe, "%.1f C", st->probe_c);
+            } else {
+                lv_label_set_text(s_val_probe, "--");
+            }
+            lv_label_set_text_fmt(s_val_speed, "%.0f rpm", st->speed_rpm);
+            lv_label_set_text_fmt(s_val_target,
+                                  "%.0f C / %.0f rpm   Safety %.0fC",
+                                  st->target_c, st->target_rpm,
+                                  st->safety_c);
+            lv_label_set_text_fmt(s_lbl_status, "updated %ds ago",
+                                  st->age_s);
         } else {
-            s_claude_ts[0] = '\0';
+            lv_label_set_text(s_val_plate, "-- C");
+            lv_label_set_text(s_val_probe, "-- C");
+            lv_label_set_text(s_val_speed, "-- rpm");
+            lv_label_set_text(s_val_target, "--");
+            lv_label_set_text(s_lbl_status, "device offline");
         }
-        s_claude_msg[0] = '\0';
-        if (s_claude_ui.lbl_reset) {
-            apply_claude_data_widgets(&s_claude_ui);
-        }
+        lv_obj_set_style_text_color(s_lbl_status, COLOR_MUTED, 0);
     });
 }
 
-void ui_claude_set_unavailable(const char *reason)
+void ui_set_offline(const char *reason)
 {
     UI_WITH_LOCK({
-        s_claude_show_placeholder = true;
-        if (reason) {
-            strncpy(s_claude_msg, reason, sizeof(s_claude_msg) - 1);
-            s_claude_msg[sizeof(s_claude_msg) - 1] = '\0';
-        } else {
-            s_claude_msg[0] = '\0';
-        }
-        if (s_claude_ui.lbl_reset) {
-            apply_claude_data_widgets(&s_claude_ui);
-        }
-    });
-}
-
-void ui_select_prev_tab(void)
-{
-    UI_WITH_LOCK({
-        if (s_tabview) {
-            uint32_t cnt = lv_tabview_get_tab_count(s_tabview);
-            if (cnt > 0) {
-                uint32_t cur = lv_tabview_get_tab_active(s_tabview);
-                uint32_t nxt = (cur + cnt - 1) % cnt;
-                lv_tabview_set_active(s_tabview, nxt, LV_ANIM_OFF);
-            }
-        }
-    });
-}
-
-void ui_select_next_tab(void)
-{
-    UI_WITH_LOCK({
-        if (s_tabview) {
-            uint32_t cnt = lv_tabview_get_tab_count(s_tabview);
-            if (cnt > 0) {
-                uint32_t cur = lv_tabview_get_tab_active(s_tabview);
-                uint32_t nxt = (cur + 1) % cnt;
-                lv_tabview_set_active(s_tabview, nxt, LV_ANIM_OFF);
-            }
-        }
-    });
-}
-
-void ui_beszel_set_status(const char *msg, uint32_t color_hex)
-{
-    UI_WITH_LOCK({
-        if (s_lbl_status) {
-            lv_label_set_text(s_lbl_status, msg ? msg : "");
-            lv_obj_set_style_text_color(s_lbl_status,
-                                        lv_color_hex(color_hex), 0);
-        }
-    });
-}
-
-void ui_beszel_set_unavailable(const char *reason)
-{
-    UI_WITH_LOCK({
-        if (s_tabview && s_host_ui_count > 0) {
-            lv_obj_delete(s_tabview);
-            s_tabview = NULL;
-            memset(s_host_ui, 0, sizeof(s_host_ui));
-            s_host_ui_count = 0;
-            memset(&s_claude_ui, 0, sizeof(s_claude_ui));
-            create_empty_tabview();
-            append_claude_tab();
-            if (s_lbl_status) {
-                lv_obj_move_foreground(s_lbl_status);
-            }
-        }
-        if (s_lbl_status) {
-            lv_label_set_text(s_lbl_status,
-                              reason ? reason : "unavailable");
-            lv_obj_set_style_text_color(s_lbl_status, COLOR_MUTED, 0);
-        }
+        lv_obj_set_style_bg_color(s_dot, COLOR_MUTED, 0);
+        lv_label_set_text(s_lbl_state, "offline");
+        lv_obj_set_style_text_color(s_lbl_state, COLOR_MUTED, 0);
+        lv_label_set_text(s_lbl_age, "");
+        lv_label_set_text(s_val_plate, "-- C");
+        lv_label_set_text(s_val_probe, "-- C");
+        lv_label_set_text(s_val_speed, "-- rpm");
+        lv_label_set_text(s_val_target, "--");
+        lv_label_set_text(s_lbl_status, reason ? reason : "offline");
+        lv_obj_set_style_text_color(s_lbl_status, COLOR_ACCENT, 0);
     });
 }

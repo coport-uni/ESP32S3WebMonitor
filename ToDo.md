@@ -599,3 +599,49 @@ GPIO 충돌 확인:
 - [x] WiFi 자격증명: root Beszel `sdkconfig`의 SSID/PW를 `examples/smart_plug/sdkconfig`(gitignored)에 복제(같은 보드·망). server URL은 Kconfig 기본값 `http://192.168.1.129:17046`.
 - [x] 실기기 flash(COM14) + 시리얼 검증: `got IP 192.168.1.103`, `discovered 2 plug(s)`, 터치 `action plug1/on -> ON` 확인. (최초엔 서버 미기동으로 `ECONNREFUSED`였고 PC에서도 동일 확인 → 사용자 서버 기동 후 정상.) 화면 `retrieving...` 표기는 사용자 육안 확인 대기.
 - [x] GitHub Issue #18 업데이트(제목/코멘트) + 커밋/푸시 → `e84a60b feat(smart_plug): standalone Tapo plug-control app (examples/smart_plug)`, pushed to `origin/main`. Issue #18 close.
+
+## 2026-06-18 | main/ 활성 펌웨어를 examples/smartplugcontroller/로 백업 (standalone, 빌드 가능)
+
+명령: "지금 main 폴더 프로젝트를 examples 폴더로 백업해줘. 나중에 빌드할 수 있도록 필요한 자료도 넣어줘." 사용자 결정(AskUserQuestion): 대상 = `examples/smartplugcontroller/`.
+
+대상: root `main/` 활성 펌웨어(Beszel + Claude usage + usage_led RGB, project `my_box3_sensor`)를 standalone ESP-IDF 프로젝트로 examples/에 충실히 복제. 나중에 단독 `idf.py build` 가능하도록 필요한 파일 포함. (examples standalone 컨벤션: 2026-05-21)
+
+설계 메모:
+- 구조: `examples/smartplugcontroller/{CMakeLists.txt, sdkconfig.defaults, dependencies.lock, README.md, main/(전체 소스)}`.
+- `main/`은 root와 byte-faithful 복사. `CMakeLists.txt`만 `project(smartplugcontroller)`로 신규.
+- `managed_components/`는 미포함(gitignored) — `idf.py build`가 `dependencies.lock` 기준 자동 다운로드. 그래서 lock 파일 포함이 "필요한 자료".
+- `sdkconfig` 미포함(gitignored, WiFi/Beszel 자격증명). 빌드 시 menuconfig로 설정 — README에 명시.
+- `sdkconfig.defaults`는 충실 복사. 빌드 시 LVGL8 잔재 심볼 `LV_MEM_CUSTOM`/`LV_MEMCPY_MEMSET_STD` 2건 "unknown kconfig symbol" 워닝이 뜨지만 root main/과 동일한 무해 노이즈(LP §3.11). 백업 충실성 우선.
+
+### 작업 항목
+
+- [ ] `examples/smartplugcontroller/main/` ← root `main/` 전체 복사(main.c, ui.c/h, beszel.c/h, network.c/h, claude_usage.c/h, usage_led.c/h, buttons_check.c/h, CMakeLists.txt, idf_component.yml, Kconfig.projbuild)
+- [ ] `examples/smartplugcontroller/CMakeLists.txt` 신규 — `project(smartplugcontroller)`
+- [ ] `examples/smartplugcontroller/sdkconfig.defaults` + `dependencies.lock` ← root 복사
+- [ ] `examples/smartplugcontroller/README.md` — 백업 설명 + 빌드법 + menuconfig 자격증명 안내
+- [ ] `idf.py build`로 빌드 가능 확인(LP §5.7)
+- [ ] GitHub Issue 생성 + 커밋/푸시
+
+## 2026-06-23 | JTAG 플래시 '-1' 오류 진단 (좀비 openocd)
+
+명령: "UART로 하니까 잘 되는데 예전엔 JTAG이 잘 됬는데 왜 지금은 안될까?" → 원인 진단 및 복구. (see LP §5.12, §5.8, §5.10)
+
+- [x] 증상 확인: VSCode JTAG 플래시 `got response: '-1', expecting: '0'`, UART(esptool COM14)는 정상
+- [x] 드라이버 바인딩 점검 — MI_02→WinUSB 정상, 워크스페이스 시리얼 캐시 무관(plain shell openocd 연결 성공) → §5.4/§5.10 배제
+- [x] 근본 원인: 좀비 `openocd.exe`(PID 34896, 19:09 기동)가 MI_02(WinUSB JTAG)를 libusb로 독점 점유 → 플래시가 띄운 2번째 openocd가 인터페이스를 못 열어 nonzero(-1) 리턴. UART은 MI_00(COM)을 써서 무관.
+- [x] 복구: `Stop-Process -Id 34896 -Force` → 잔여 openocd 0개 확인
+- [x] 검증: `openocd -s <scripts> -f board/esp32s3-builtin.cfg -c "init; exit"` → `Examination succeed` ×2, EXITCODE 0 → JTAG 정상 복구
+- [x] 메모리 노트 `esp-box3-openocd-jtag` 갱신 + LearnedPatterns §5.12 추가
+- [ ] (선택) GitHub Issue — 진단성 작업이라 미생성. 필요 시 사용자 요청 시 생성
+
+## 2026-06-23 | Hotplate UI 개선 (pending 상태 · ON 버튼 빨간색 · probe/plate 동시 표시)
+
+명령: "UI 개선 — (1) 버튼 조작 후 딜레이 동안 connection 상태가 'pending'으로 바뀌게, (2) Heat/Stir가 ON이면 버튼 색이 빨간색으로, (3) UI에 probe 온도와 plate 온도를 모두 표시." 대상: root `main/ui.c` (hotplate controller 펌웨어, `my_box3_sensor`). (see LP §3 LVGL quirks)
+
+- [x] 버튼 클릭(enqueue) 직후 connection 인디케이터를 amber "pending"으로 전환 — 다음 status fetch(ui_set_status/offline)가 자연히 덮어씀 (show_pending(), COLOR_PENDING 0xFFD166)
+- [x] Heat/Stir 토글: ON이면 버튼 bg 빨간색(`lv_obj_set_style_bg_color`), OFF이면 `lv_obj_remove_local_style_prop(LV_STYLE_BG_COLOR)`로 테마 기본색 복귀 (set_toggle_color(), COLOR_ON 0xE63946)
+- [x] make_button이 버튼 객체를 반환하도록 리팩터(라벨은 `lv_obj_get_child(btn,0)`로 취득), s_btn_heat/s_btn_motor 보관
+- [x] Probe 온도 전용 reading row 추가, Plate와 함께 항상 표시 (offline 시 "--")
+- [x] readings 레이아웃 재배치(Plate y26/Probe y48/Speed y70/Target y92) + safety를 target 줄에 통합, aux 줄 제거
+- [x] `idf.py build` 무경고 빌드 확인 — ui.c 단독 재컴파일 exit=0, warning 0건, bin 0x138e80 (17% free)
+- [x] GitHub Issue 생성 (#20) + 커밋/푸시
