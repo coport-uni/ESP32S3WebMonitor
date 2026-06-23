@@ -20,12 +20,11 @@ typedef enum {
  * @brief  Bring up the WiFi STA stack non-blockingly.
  *
  * Initializes NVS, esp_netif, the default event loop and esp_wifi in
- * station mode using CONFIG_BESZEL_WIFI_SSID / CONFIG_BESZEL_WIFI_PASSWORD,
- * then spawns an internal task that keeps reconnecting on disconnect with
- * exponential backoff. Returns immediately — the caller does not wait for
- * association.
+ * station mode using CONFIG_HOTPLATE_WIFI_SSID /
+ * CONFIG_HOTPLATE_WIFI_PASSWORD, then keeps reconnecting on disconnect.
+ * Returns immediately — the caller does not wait for association.
  *
- * If CONFIG_BESZEL_WIFI_SSID is empty, this logs a warning and returns
+ * If CONFIG_HOTPLATE_WIFI_SSID is empty, this logs a warning and returns
  * ESP_OK without starting WiFi.
  */
 esp_err_t       network_init(void);
@@ -34,8 +33,7 @@ esp_err_t       network_init(void);
  * @brief  Return the current WiFi STA connection state.
  *
  * Safe to call from any task; reads a single word updated by the network
- * task. Useful for status indicators that should distinguish idle,
- * connecting, connected, and disconnected.
+ * event handler.
  *
  * @return One of the `NETWORK_STATE_*` enum values.
  */
@@ -45,8 +43,6 @@ network_state_t network_get_state(void);
  * @brief  Convenience predicate: link is up and an IP has been acquired.
  *
  * Equivalent to `network_get_state() == NETWORK_STATE_CONNECTED`.
- * Intended for gating one-shot HTTP requests where the caller does not
- * care about the precise sub-state.
  *
  * @return true if connected, false otherwise.
  */

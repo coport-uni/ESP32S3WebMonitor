@@ -66,8 +66,8 @@ esp_err_t network_init(void)
         s_event_group = xEventGroupCreate();
     }
 
-    if (strlen(CONFIG_BESZEL_WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "CONFIG_BESZEL_WIFI_SSID is empty; WiFi disabled");
+    if (strlen(CONFIG_HOTPLATE_WIFI_SSID) == 0) {
+        ESP_LOGW(TAG, "CONFIG_HOTPLATE_WIFI_SSID is empty; WiFi disabled");
         s_disabled = true;
         s_state = NETWORK_STATE_IDLE;
         return ESP_OK;
@@ -88,15 +88,15 @@ esp_err_t network_init(void)
 
     wifi_config_t wcfg = { 0 };
     strncpy((char *)wcfg.sta.ssid,
-            CONFIG_BESZEL_WIFI_SSID, sizeof(wcfg.sta.ssid) - 1);
+            CONFIG_HOTPLATE_WIFI_SSID, sizeof(wcfg.sta.ssid) - 1);
     strncpy((char *)wcfg.sta.password,
-            CONFIG_BESZEL_WIFI_PASSWORD, sizeof(wcfg.sta.password) - 1);
+            CONFIG_HOTPLATE_WIFI_PASSWORD, sizeof(wcfg.sta.password) - 1);
     wcfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wcfg.sta.pmf_cfg.capable = true;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wcfg));
-    ESP_LOGI(TAG, "starting wifi, ssid=\"%s\"", CONFIG_BESZEL_WIFI_SSID);
+    ESP_LOGI(TAG, "starting wifi, ssid=\"%s\"", CONFIG_HOTPLATE_WIFI_SSID);
     ESP_ERROR_CHECK(esp_wifi_start());
 
     return ESP_OK;
