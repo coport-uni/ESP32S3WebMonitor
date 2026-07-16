@@ -659,7 +659,9 @@ GPIO 충돌 확인:
 - [x] 새 위치에서 무경고 빌드 검증 (LP §5.7 env-dump 레시피) — clean 빌드 exit=0, `Project build complete`, 컴파일 경고 0건, `unknown kconfig symbol` 0건. `hotplate_controller.bin` 0x138e80 (17% free) → **이동 전 루트 빌드(2026-06-23 항목)의 0x138e80·17% free 와 정확히 일치**, 이동이 펌웨어를 바꾸지 않았음을 확인
 - [x] 빌드 실패 1건 진단 — 원인은 코드가 아니라 Windows 파일 잠금(`liblwip.a`): harness가 "stopped"로 보고한 1차 빌드(PID 31048)가 실제로는 생존 + `post-write-build-check.ps1` 훅이 띄운 3번째 빌드(PID 41940)까지 같은 `build/` 경합. 전량 kill(MCP 서버 python 보존) → `build/` 삭제 → 단일 빌드로 해결
 - [x] LearnedPatterns §5.13 추가 — "stopped 보고된 백그라운드 빌드는 살아있다" (§5.8/§5.12 와 동일 계열: 스테일 프로세스가 리소스 점유)
-- [ ] GitHub Issue 생성 (gh, origin=ESP32S3WebMonitor) + 커밋/푸시 — Issue [#22](https://github.com/coport-uni/ESP32S3WebMonitor/issues/22) 생성 완료, 커밋/푸시 대기
+- [x] GitHub Issue 생성 (gh, origin=ESP32S3WebMonitor) + 커밋/푸시 — Issue [#22](https://github.com/coport-uni/ESP32S3WebMonitor/issues/22), 커밋 `4a2d802` (12개 파일 전부 git rename 100% = 소스 변경 0줄), push `6aa0f49..4a2d802` 확인
+
+추가 메모: 작업 중 루트 `CMakeLists.txt`(`project(my_box3_sensor)` → `project(home_assistant_client)`)와 루트 `sdkconfig.defaults`(LVGL 죽은 심볼 제거)에 **이 작업과 무관한 외부 변경**이 발견됨. 사용자가 루트에 새 펌웨어(home_assistant_client)를 준비 중인 것으로 보여 커밋에서 제외하고 워킹트리에 그대로 둠. `examples/server_monitor/` 미커밋 WIP도 계획대로 미포함.
 
 메모: 사용자 선택에 따라 이동 후 루트 `main/` 은 사라지며 루트 프로젝트(`project(my_box3_sensor)`)는 빌드 불가 상태가 된다(의도된 결과). 루트 `README.md` 는 54a0d12 시점부터 이미 Beszel 기준으로 stale 하므로 이번 범위에서 제외. `examples/server_monitor/` 의 미커밋 변경(beszel/claude_usage/usage_led)은 이번 작업과 무관하므로 건드리지 않는다.
 
