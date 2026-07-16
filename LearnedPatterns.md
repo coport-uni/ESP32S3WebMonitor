@@ -310,6 +310,25 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
    PowerShell 5.1 wraps OpenOCD's normal `Info :` stderr logging as a red `NativeCommandError` — that is **not** a failure; judge by the exit code and the `Examination succeed` lines, not the red text.
 - **Rule**: When VS Code JTAG flash fails with `got response: '-1', expecting: '0'` but UART flash to the same board works, the interface is most likely locked by another process — run `Get-Process openocd` FIRST. Diagnosis order for JTAG-flash failure on this host: (1) stray `openocd.exe` holding MI_02 (this entry), (2) MI_02 WinUSB binding (§5.4), (3) workspaceStorage stale serial filter (§5.10). Always let a debug session / OpenOCD exit cleanly (stop the debug session, don't just close the window) so it releases the interface. (from ToDo: 2026-06-23 JTAG 플래시 '-1' 오류 진단 (좀비 openocd))
 
+### 5.13 A background `idf.py build` reported as "stopped" keeps running → a second build on the same `build/` dies with `File can't be removed and still exist`
+
+- **Problem**: A background build was reported by the agent harness as `stopped` ("no completion record found; it may have been stopped or was running when the process exited"). Restarting the build in the same folder failed with `FAILED: esp-idf/lwip/liblwip.a` / `CMake Error: File can't be removed and still exist: esp-idf\lwip\liblwip.a`. The error names a stock IDF component and looks like a corrupt build tree, which invites a pointless `fullclean`-and-retry loop.
+- **Cause**: The "stopped" status only means the harness lost its completion record — it does **not** kill the process tree. The original `idf.py build` (and its `ninja` + ~30 `xtensa-esp32s3-elf-gcc` + ~34 `ccache` children) was still running and holding `liblwip.a` open. Windows refuses to unlink a file with an open handle, so the second build's CMake could not replace it. Compounding it: `.claude/hooks/post-write-build-check.ps1` fires its own `idf.py build` on every Write to `main/**`, `CMakeLists.txt`, `sdkconfig.defaults`, or `idf_component.yml` — so writing project files during a manual build silently puts a *third* build on the same directory. Same family as §5.8 (stale `idf_monitor.py` holds the COM port) and §5.12 (zombie `openocd.exe` holds the JTAG interface): a stale process holding a resource, surfaced as a misleading downstream error.
+- **Fix**: Never trust "stopped" — enumerate and kill before relaunching, then wipe the raced `build/` (it is gitignored, so this is safe):
+   ```powershell
+   # The idf.py drivers must be killed by PID, not by name: Stop-Process -Name python
+   # would also kill the user's Claude Desktop MCP servers (anaconda python).
+   Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+       Where-Object { $_.CommandLine -like '*idf.py*' } |
+       ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+   foreach ($n in 'ninja','xtensa-esp32s3-elf-gcc','ccache','cmake') {
+       try { Stop-Process -Name $n -Force -ErrorAction Stop } catch {}
+   }
+   # Children respawn for a moment — loop until the residual count is 0, then:
+   Remove-Item -Recurse -Force .\build
+   ```
+- **Rule**: Before relaunching an ESP-IDF build that was reported stopped/killed, always confirm the process tree is actually dead (`Get-Process ninja,ccache,xtensa-esp32s3-elf-gcc`) — never run two builds against one `build/`. Kill `idf.py` drivers by PID filtered on command line, never `Stop-Process -Name python`, which would take down unrelated MCP servers. When editing project files during a manual build, remember `post-write-build-check.ps1` launches a competing build. A `File can't be removed and still exist` error means a live handle, not a corrupt tree — `fullclean` alone will not fix it. (from ToDo: 2026-07-16 Hotplate 펌웨어를 examples/hotplate_controller 로 이동)
+
 ---
 
 ## §99. Uncategorized

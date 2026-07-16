@@ -645,3 +645,46 @@ GPIO 충돌 확인:
 - [x] readings 레이아웃 재배치(Plate y26/Probe y48/Speed y70/Target y92) + safety를 target 줄에 통합, aux 줄 제거
 - [x] `idf.py build` 무경고 빌드 확인 — ui.c 단독 재컴파일 exit=0, warning 0건, bin 0x138e80 (17% free)
 - [x] GitHub Issue 생성 (#20) + 커밋/푸시
+
+## 2026-07-16 | Hotplate 펌웨어를 examples/hotplate_controller 로 이동
+
+명령: "지금 main에 있는 프로젝트를 example 폴더의 hotplate control로 옮겨줘". 대상: 루트 `main/` 의 hotplate controller 펌웨어(54a0d12). 방식: 사용자 확인 결과 **진짜 이동(git mv)** + 폴더명 `hotplate_controller`. 목적: examples/README.md 의 "standalone 프로젝트 1개 = 1폴더" 규약에 맞춰 hotplate 펌웨어를 독립 예제로 승격. (see LP §3.11, §5.7)
+
+- [x] `examples/hotplate_controller/main/` 생성 후 루트 `main/` 추적 파일 전체를 `git mv` — 실제 **12개**(ToDo 초안의 11개는 오기): main.c, ui.c/h, buttons_check.c/h, network.c/h, hotplate_client.c/h, CMakeLists.txt, Kconfig.projbuild, idf_component.yml. 빈 `main/` 디렉터리는 rmdir
+- [x] `examples/hotplate_controller/CMakeLists.txt` 작성 — `project(hotplate_controller)` (examples/README.md "Adding a new example" 3단계)
+- [x] 루트 `sdkconfig.defaults` 복사 — LP §3.11 에 따라 죽은 LVGL 8 심볼 `CONFIG_LV_MEM_CUSTOM` / `CONFIG_LV_MEMCPY_MEMSET_STD` + 이를 설명하던 주석까지 3줄 제거 → 빌드 로그 `unknown kconfig symbol` 0건으로 검증됨
+- [x] 루트 `dependencies.lock` 복사 (examples 는 lock 추적 / managed_components 는 gitignore) — manifest_hash e7d13ec…, target esp32s3
+- [x] `examples/hotplate_controller/README.md` 작성 (smart_plug 예제와 동일 수준의 빌드·Kconfig 안내) — Kconfig 6개 옵션 표 + 레이아웃 트리
+- [x] `examples/README.md` 표에 hotplate_controller 행 추가 + stale 문구 4곳 수정(L3 "snapshots for ../main/", L10 "active firmware lives in ../main/", L24/L28 "matches the root project") + "Adding a new example" 4단계에 LP §3.11 경고 추가
+- [x] 새 위치에서 무경고 빌드 검증 (LP §5.7 env-dump 레시피) — clean 빌드 exit=0, `Project build complete`, 컴파일 경고 0건, `unknown kconfig symbol` 0건. `hotplate_controller.bin` 0x138e80 (17% free) → **이동 전 루트 빌드(2026-06-23 항목)의 0x138e80·17% free 와 정확히 일치**, 이동이 펌웨어를 바꾸지 않았음을 확인
+- [x] 빌드 실패 1건 진단 — 원인은 코드가 아니라 Windows 파일 잠금(`liblwip.a`): harness가 "stopped"로 보고한 1차 빌드(PID 31048)가 실제로는 생존 + `post-write-build-check.ps1` 훅이 띄운 3번째 빌드(PID 41940)까지 같은 `build/` 경합. 전량 kill(MCP 서버 python 보존) → `build/` 삭제 → 단일 빌드로 해결
+- [x] LearnedPatterns §5.13 추가 — "stopped 보고된 백그라운드 빌드는 살아있다" (§5.8/§5.12 와 동일 계열: 스테일 프로세스가 리소스 점유)
+- [ ] GitHub Issue 생성 (gh, origin=ESP32S3WebMonitor) + 커밋/푸시 — Issue [#22](https://github.com/coport-uni/ESP32S3WebMonitor/issues/22) 생성 완료, 커밋/푸시 대기
+
+메모: 사용자 선택에 따라 이동 후 루트 `main/` 은 사라지며 루트 프로젝트(`project(my_box3_sensor)`)는 빌드 불가 상태가 된다(의도된 결과). 루트 `README.md` 는 54a0d12 시점부터 이미 Beszel 기준으로 stale 하므로 이번 범위에서 제외. `examples/server_monitor/` 의 미커밋 변경(beszel/claude_usage/usage_led)은 이번 작업과 무관하므로 건드리지 않는다.
+
+## 2026-07-16 | Home Assistant 제어 클라이언트 (루트 main/)
+
+명령: "ESP32S3를 통해 HomeAssistant 서버에 연결되어있는 사물인터넷 장치들을 다루고 싶어" → "/main 폴더에서 진행해줘". 대상: 루트 `main/` (hotplate 이동으로 비워진 자리). HA 서버 `http://192.168.1.232:8123`. 설계 결정(사용자 확인): REST 폴링 / 조명·스위치 제어 + 센서 표시 / 엔티티 자동 발견 / device_class 필터 / 도메인별 탭뷰. (see LP §2.1, §2.3, §3.1, §3.7, §3.11, §5.7, §5.9)
+
+- [ ] 루트 `CMakeLists.txt` 프로젝트명 `my_box3_sensor` → `home_assistant_client` (IMU 데모 시절 이름으로 이미 stale)
+- [ ] 루트 `sdkconfig.defaults` 에서 죽은 LVGL 8 심볼 `CONFIG_LV_MEM_CUSTOM` / `CONFIG_LV_MEMCPY_MEMSET_STD` 2줄 제거 (LP §3.11) — `CONFIG_LV_USE_FLOAT=y` 는 센서 `%f` 출력에 필요하므로 유지 (LP §3.1)
+- [ ] 낡은 루트 `sdkconfig` 제거 — hotplate 키만 남아있어 무의미. 재생성 후 HA_CLIENT_ 신규 키에 default 반영 (LP §2.1 corollary: 신규 키는 default 자동 적용). sdkconfig 는 gitignore 대상이라 WiFi/토큰을 여기 넣어도 유출 없음
+- [ ] `main/Kconfig.projbuild` — 메뉴 "Home Assistant client", 접두사 `HA_CLIENT_` (`HA_` 는 짧아 충돌 위험). 키: WIFI_SSID / WIFI_PASSWORD / SERVER_URL / TOKEN / POLL_INTERVAL_S / MAX_PER_DOMAIN / SENSOR_CLASSES
+- [ ] `main/CMakeLists.txt` + `main/idf_component.yml` — `json` 을 REQUIRES 에 넣지 않고 `espressif/cjson` managed component 사용 (LP §3.7)
+- [ ] `main/network.c/.h` — `examples/smart_plug/` 에서 복사 후 `CONFIG_SMART_PLUG_WIFI_*` → `CONFIG_HA_CLIENT_WIFI_*` 개명 (공용 components/ 승격 안 함 — ToDo 2026-05-21 결정)
+- [ ] `main/buttons_check.c/.h` — `examples/server_monitor/` 에서 복사 (CONFIG→prev tab, MUTE→next tab)
+- [ ] `main/ha_client.c/.h` — `POST /api/template` 폴링. `/api/states` 는 전체 엔티티라 수십~수백 KB → 버퍼 초과로 잘림, LP §2.3 규칙대로 소스(HA)에서 Jinja 로 필터해 ~2KB 로 축소. 요청 본문은 cJSON 으로 조립(탭/개행/따옴표 escape). 응답은 평문 TSV → 줄 단위 파싱
+- [ ] `main/ha_client.c` — 명령 큐 + 워커 태스크 (`smart_plug.c:431-512` 이식). LVGL 콜백에서 HTTP 금지(WDT), `xQueueReceive(q,&cmd,period)` 가 폴 타이머 겸 명령 대기. 스택 8192 (HTTP+cJSON 중첩)
+- [ ] `main/ha_client.c` — `toggle` 대신 명시적 `turn_on`/`turn_off` (폴링 지연 중 2회 탭 시 toggle 은 의도와 반대로 끝남). 상한 초과 시 조용히 버리지 않고 ESP_LOGW
+- [ ] `main/ui.c/.h` — lv_tabview 320×220 + 하단 상태 라벨 (`server_monitor/ui.c` 구조). Lights/Switch/Sensor 탭, 0개면 탭 미생성. UI_WITH_LOCK 매크로, topology_changed → rebuild (전체 이름으로 비교)
+- [ ] `main/ui.c` — 스위치 재진입 가드: 폴링 반영 시 `lv_obj_add_state` 가 VALUE_CHANGED 를 되쏘는지 하드웨어 검증. `s_applying` 플래그로 방어 후 불필요하면 제거
+- [ ] `main/main.c` — init 순서 고정: bsp_i2c_init → bsp_display_start → backlight_on → lock/ui_create/unlock → buttons_check_init → network_init → ha_client_init
+- [ ] **선행(사용자)**: HA 장기 액세스 토큰 발급 — HA REST API 는 id/pw 를 받지 않음. `arduino`/`peal2024` 로 로그인 → 프로필 → 보안 → 장기 액세스 토큰 → 생성. beszel 식 토큰 갱신 로직 불필요(기본 10년)
+- [ ] 플래시 전 curl 로 `/api/template` 도달 확인 — HA 는 별도 호스트(.232)라 loopback 아님, LP §5.9 함정에 안 걸리는 유효 테스트. 조명 목록·응답 크기 확인 후 device_class 필터 조정
+- [ ] 무경고 빌드 (LP §5.7 레시피, `run_in_background`) — 컴파일 경고 0건 + unknown kconfig symbol 0건
+- [ ] 하드웨어 검증: 읽기(화면 vs HA 웹UI) / 쓰기(BOX-3 터치 → 실제 조명) / 역방향(HA 웹UI 변경 → 폴 주기 내 반영) / 토폴로지 변경
+- [ ] 루트 `README.md` 갱신 (54a0d12 시점부터 Beszel 기준으로 stale) + `LearnedPatterns.md` 에 새 gotcha append
+- [ ] GitHub Issue 생성 + 커밋/푸시
+
+메모: 범위 제외 — WebSocket 푸시(1단계는 REST 폴링, 상태 변경 최대 10초 지연 감수하고 재연결·핑퐁·메시지ID 관리 회피), 밝기/색온도 슬라이더, climate 도메인, HTTPS(LAN 평문, 기존 앱 전부 동일). 루트 `CLAUDE.md` 의 "Project" 절은 IMU 데모(`my_box3_sensor`) 기준으로 이미 stale — 프로젝트명 변경과 함께 손볼지는 별건.
