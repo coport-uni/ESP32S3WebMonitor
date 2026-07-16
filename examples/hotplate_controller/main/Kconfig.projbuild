@@ -2,16 +2,18 @@ menu "Hotplate monitor"
 
 config HOTPLATE_WIFI_SSID
     string "WiFi SSID"
-    default "TP-Link_0624"
+    default ""
     help
         WPA2-Personal SSID. Leave empty to skip WiFi bring-up; the UI
         shows a "configure WiFi" message.
 
 config HOTPLATE_WIFI_PASSWORD
     string "WiFi password"
-    default "peal2024"
+    default ""
     help
-        WPA2-Personal passphrase. Stored in the local sdkconfig only.
+        WPA2-Personal passphrase. Set it in menuconfig, which writes it
+        to the local gitignored sdkconfig. Never give this a default —
+        Kconfig.projbuild is tracked, and this repo is public.
 
 config HOTPLATE_SERVER_URL
     string "Hotplate server base URL"

@@ -123,6 +123,37 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 - **Fix**: Toggle on with `lv_obj_set_style_bg_color(btn, COLOR_ON, 0)`; toggle off with `lv_obj_remove_local_style_prop(btn, LV_STYLE_BG_COLOR, 0)` to drop the override so the theme default re-applies. Reach a button's text label with `lv_obj_get_child(btn, 0)`.
 - **Rule**: To clear a per-widget style and fall back to the theme, remove the local style prop — never guess the default hex. (from ToDo: 2026-06-23 hotplate UI improvements)
 
+### 3.13 Home Assistant's REST API rejects a username/password — it takes a long-lived token only
+
+- **Problem**: Planned to authenticate to HA with the account username and password that were handed over. Every `/api/` call returned `401: Unauthorized`.
+- **Cause**: Those credentials log into the *web UI*. The REST API only accepts `Authorization: Bearer <long-lived access token>`. The browser login flow (`/auth/login_flow` → `/auth/token`) yields a 30-minute token with a refresh cycle and is designed for browsers, not devices; and a long-lived token cannot be minted over REST at all — only the WebSocket API (`auth/long_lived_access_token`) or the UI can create one.
+- **Fix**: Create the token by hand: profile → Security tab → Long-lived access tokens → Create. Paste it into `CONFIG_HA_CLIENT_TOKEN`. Default lifespan is 10 years, so — unlike `beszel.c`, whose PocketBase JWT expires in 6 h and needs `token_is_fresh()` plus a 401-retry — **no refresh machinery is needed**. Do not port it.
+- **Rule**: For Home Assistant, a username and password are not API credentials. Get a long-lived token, treat it as permanent, and skip the refresh code. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)
+
+### 3.14 Home Assistant exposes no attribute that separates a real device from an integration's config entities
+
+- **Problem**: The design was "sweep the `light` and `switch` domains and show what's there". On the live server that produced 18 switches of which **3 were real plugs** — the rest were `switch.tapo_p1_led`, `switch.tapo_p1_auto_off_enabled`, `switch.tapo_p1_auto_update_enabled` and friends, i.e. the Tapo integration's own settings. With a per-domain cap of 8, one real plug was pushed off the screen by junk toggles.
+- **Cause**: HA *does* mark these internally (`entity_category: config`), but that field lives in the entity registry and **is not exposed to the template API**. Every candidate discriminator returns an identical value for `switch.tapo_p1` and `switch.tapo_p1_led`:
+
+  | Probe | Real plug | Config toggle |
+  |---|---|---|
+  | `s.entity_category` | `NOT_DEFINED` | `NOT_DEFINED` |
+  | `s.attributes.get('device_class')` | `NONE` | `NONE` |
+  | `s.attributes` | `{friendly_name}` only | `{friendly_name}` only |
+  | `area_name(e)` | `Living Room` | `Living Room` (inherits the parent device's area) |
+  | `is_hidden_entity(e)` | `False` | `False` |
+
+  The entity registry is reachable over the **WebSocket** API (`config/entity_registry/list`) but not over REST, so a device that only speaks REST cannot see `entity_category` at all.
+- **Fix**: Filter by an HA **label** instead: `{% for e in label_entities('box3') %}`. The selection then lives in HA, not in firmware — labelling one more entity makes it appear on the next poll with no reflash. `CONFIG_HA_CLIENT_LABEL` replaced the `device_class` allow-list and the per-domain caps entirely.
+- **Rule**: Never assume a domain sweep yields user-facing devices — integrations pollute their own domain with config entities and HA gives you nothing to filter them by over REST. Push the selection into HA (a label) rather than trying to infer it on the device. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)
+
+### 3.15 LVGL 9 — `lv_obj_add_state()` does not fire `LV_EVENT_VALUE_CHANGED`, so refreshing a switch cannot loop
+
+- **Problem**: A poll that writes a switch's state back into the widget could plausibly re-trigger the widget's own `VALUE_CHANGED` handler, which would re-issue the command that produced the state — an infinite loop hammering the server. Worth a defensive `s_applying` flag?
+- **Cause**: The answer is in the source, not in intuition. `lv_obj_add_state()` / `lv_obj_remove_state()` call `update_obj_state()`, which only compares styles and invalidates — it sends nothing (`lv_obj.c`). `VALUE_CHANGED` for a `LV_OBJ_FLAG_CHECKABLE` widget is sent from the **input-driven** `LV_EVENT_RELEASED` branch (`lv_obj.c:829-835`), which toggles `LV_STATE_CHECKED` and *then* calls `lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, NULL)`. `lv_switch.c` itself never sends the event; it only receives it.
+- **Fix**: No guard flag. A comment on the callback records *why* it is safe, which is the thing the code cannot show.
+- **Rule**: Programmatic state changes in LVGL 9 do not raise widget events — only indev processing does. Before adding a re-entrancy guard, grep `managed_components/lvgl__lvgl/src/` for who actually calls `lv_obj_send_event`; a guard against a verified non-behaviour is speculative cruft. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)
+
 ---
 
 ## §4. Workflow Lessons
@@ -154,6 +185,20 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
      ```
   Prefer pins that are explicitly exposed for external use — on BOX-3 that's PMOD1 (`BSP_PMOD1_IO3 / IO5 / IO7 / IO8` = GPIO 39 / 21 / 38 / 40), which were chosen for the new heartbeat LED for exactly this reason.
 - **Rule**: Pin numbers are never picked from memory or from "the project doesn't import that module". Run capability → BSP → project before writing the configuration, and record the three findings in the ToDo entry so a reviewer can see the work. If any step is uncertain, choose a different pin or test on a breadboard before soldering. (from ToDo: 2026-05-28 Claude 사용량 갱신 시 RGB LED 주황 깜빡 (핀 재지정))
+
+### 4.3 Probe a third-party server with a host script before writing the firmware against it
+
+- **Problem**: The Home Assistant client was fully written — Kconfig, template builder, TSV parser, UI — against a mental model of what HA would return. A ~60-line Python probe run *before the first build* invalidated two load-bearing assumptions at once: there were **zero** `light` entities (the whole domain that half the UI was designed around), and the `device_class` allow-list (`temperature,humidity,power,illuminance`) matched exactly one class that existed on the server. A third probe then killed the entire discovery design (see §3.14).
+- **Cause**: Every fact about a third-party server is a guess until measured — the shape of the data, which fields exist, how big the response is, whether the query syntax is even valid. Discovering any of it from a serial log means: edit → build (~1 min) → flash (~30 s) → provoke the code path → read a truncated `ESP_LOGW`. That is a minutes-long loop with almost no visibility, and the firmware is the worst possible place to learn what the server does.
+- **Fix**: Write the probe in `claude_test/` first, rendering the *exact* query the firmware builds. Have it read its URL and credentials from the gitignored `sdkconfig` — the same place the firmware gets them — so no secret reaches a command line, a repo file, or the script's source. Then the correction costs a few lines instead of a flash cycle. Record what each probe taught in `claude_test/README.md`; that table is the real deliverable, since the script itself is disposable.
+- **Rule**: Before writing firmware against any server you have not measured, spend ten minutes on a host-side probe that renders the same request. Assume nothing about entity counts, field names, response size, or query syntax. If a design decision rests on what the server returns, measure it before the first build — not after the first flash. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)
+
+### 4.4 The permission classifier's objection usually names the better design
+
+- **Problem**: Two actions were blocked mid-task: (1) exchanging the HA username/password for a token via `/auth/login_flow`, and (2) passing the long-lived token to a probe script as `argv[1]`.
+- **Cause**: Both were real smells, not false positives. (1) was reaching for a browser auth flow to dodge a documented manual setup step — and it would have produced a 30-minute token needing refresh logic, when the correct artifact was a 10-year token created in the UI. (2) put a live secret in the tool transcript.
+- **Fix**: Take the objection at face value and follow the alternative it names. For (2) the reason literally said *"rather than reading it from a config file the script consumes internally"* — so the probe reads `CONFIG_HA_CLIENT_TOKEN` out of the gitignored `sdkconfig`, which is both accepted and simply better: no secret on a command line, and the probe and the firmware read from one source of truth.
+- **Rule**: When the classifier blocks something, do not look for a way around it. Read the stated reason — it usually describes the design you should have had. If it genuinely blocks the task, stop and ask the user rather than route around it. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)
 
 ---
 
@@ -334,3 +379,10 @@ Created: 2026-05-11 (bootstrap from BOX-3 firmware work)
 ## §99. Uncategorized
 
 (empty — temporary holding spot for findings that do not fit §1-§5)
+
+### 5.14 A stale registry cache means "verify over REST, not over the socket that wrote"
+
+- **Problem**: `claude_test/apply_ha_labels.py` wrote the `box3` label onto 9 entities over the Home Assistant WebSocket API and every write returned `success: true` — but the `render_template` verification issued on that same connection, immediately afterwards, returned **empty**. It read as a silent write failure.
+- **Cause**: The write had landed. The template render on that connection was still serving a registry view from before the update. A fresh `POST /api/template` over REST returned all 9 rows straight away, and the device picked them up on its next poll.
+- **Fix**: Verify a registry write over a *different* connection than the one that made it — for this project, over REST, which is also the path the firmware actually uses. That makes the check prove the thing that matters (can the device see it?) rather than the thing that doesn't (does the writer's own socket see it?).
+- **Rule**: Never confirm a write over the connection that performed it. Read back through the path the consumer will use. An empty read-back right after a `success: true` write is a cache tell, not a failure tell. Related: `config/entity_registry/update` takes `labels` as a list of **label_ids**, not display names. (from ToDo: 2026-07-16 Home Assistant 제어 클라이언트)

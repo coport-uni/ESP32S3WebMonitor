@@ -1,56 +1,49 @@
 # ESP32S3WebMonitor
 
-A LVGL dashboard for the [ESP32-S3-BOX-3](https://github.com/espressif/esp-box) that renders **two kinds of tab on the 320×240 LCD**:
+A **Home Assistant control panel** for the [ESP32-S3-BOX-3](https://github.com/espressif/esp-box). Toggle your lights and switches from the 320×240 LCD, and watch your sensors, without HA's app.
 
-- **One tab per Beszel host** — polls a self-hosted [Beszel](https://beszel.dev/) (PocketBase) instance over HTTP and shows live CPU / MEM / GPU / DISK usage as horizontal bars, plus uptime and an UP/DOWN indicator.
-- **One always-present `Claude` tab** — polls a tiny Python HTTP server on the host PC that serves `ClaudeUsage.csv` (current session %, time until reset, weekly all-models %).
-
-An optional **external RGB heartbeat LED** wired to PMOD1 (R=GPIO 21, G=GPIO 38, B=GPIO 39, common cathode) blinks orange for ~300 ms every time a fresh Claude usage CSV is successfully received and parsed. The firmware boots and runs normally without the LED attached.
+**No entity IDs live in this firmware.** It knows one thing: a Home Assistant **label**. Every poll asks HA "give me everything tagged `box3`", so labelling one more entity in HA makes it appear on screen within one poll — no rebuild, no reflash. Unlabel it and it disappears.
 
 This README walks an absolute beginner from a fresh Windows PC to flashing the firmware. If you have already used ESP-IDF, jump straight to [Build, Flash, Monitor](#6-build-flash-monitor).
+
+> Other firmware in this repo lives under [`examples/`](examples/) — a Beszel server monitor, a Tapo plug controller, a hotplate controller, a syringe-pump client, and a BOX-3 peripheral self-test. Each is a standalone ESP-IDF project.
 
 ---
 
 ## Screen layout
 
-Live device — Beszel host tab and Claude usage tab:
-
-| Beszel host tab (`3090Server`) | Claude usage tab |
-|---|---|
-| ![Beszel host tab showing CPU/MEM/GPU/DISK bars](media/KakaoTalk_20260512_094441173.jpg) | ![Claude usage tab with session, week, reset-in](media/KakaoTalk_20260512_094441173_01.jpg) |
-
-ASCII schematic of a Beszel host tab:
+One tab per domain, built from whatever came back labelled. A domain with nothing labelled gets no tab at all.
 
 ```
 ┌─────────────────────────────────────┐
-│ H200Server │ 3090Server │ Claude    │ ← tab bar (one per Beszel host + Claude)
+│  Switch  │  Sensor                  │ ← one tab per domain present
 ├─────────────────────────────────────┤
-│ ● UP                  Up 42d 5h     │
-│ CPU  ██████░░░░░░░░░░░░░░  12%      │
-│ MEM  ████░░░░░░░░░░░░░░░░   4%      │
-│ GPU  ███░░░░░░░░░░░░░░░░░░  18%     │
-│ DISK ███████░░░░░░░░░░░░░░  37%     │
+│ UNO Q MCU UNO Q LED3_R      (   ●)  │
+│ UNO Q MCU UNO Q LED3_G      (   ●)  │
+│ UNO Q MCU UNO Q LED3_B      (   ●)  │
+│ tapo_p1                     (   ●)  │
+│ tapo_p2                     (●   )  │ ← green = on
 ├─────────────────────────────────────┤
-│ updated 4s ago                      │ ← status footer (WiFi / auth / poll state)
+│ updated                             │ ← status footer
 └─────────────────────────────────────┘
 ```
 
-The `Claude` tab uses a different layout (no UP/DOWN, no uptime):
+The `Sensor` tab is read-only — name on the left, value and unit on the right:
 
 ```
 ┌─────────────────────────────────────┐
-│ Updated 2026-05-12 8:34             │
-│ SESSION  ██░░░░░░░░░░░░░░░░░░   5%  │
-│ WEEK     ██████░░░░░░░░░░░░░░  31%  │
-│                                     │
-│         Reset in 4h 46m             │ ← centered accent
+│ tapo_p1 Current consumption   0.0 W │
+│ tapo_p2 Current consumption   7.7 W │
+│ tapo_p3 Current consumption   0.0 W │
 └─────────────────────────────────────┘
 ```
 
-- **Tab name** = Beszel host name (e.g. `H200Server`) or the fixed string `Claude`.
-- **`CONFIG` / `MUTE`** buttons cycle the active tab (prev / next) across *all* tabs, host and Claude alike. Touch swipe works natively.
-- **Status footer**: `WiFi connecting…` / `auth failed (menuconfig)` / `updated Ns ago` / `stale Ns`.
-- Bar colour reflects pressure: cyan ≤ 69 %, yellow 70–89 %, pink ≥ 90 %.
+- **Tabs**: `Lights` / `Switch` / `Sensor`, created only for domains that have a labelled entity.
+- **Touch a switch** → the command is queued and sent, then the state is re-read from HA. If HA refuses, the switch snaps back rather than lying to you.
+- **`CONFIG` / `MUTE`** buttons cycle tabs (prev / next). Touch swipe works natively.
+- **Status footer**: `WiFi connecting…` / `set HA token (menuconfig)` / `sending…` / `updated` / `HA unreachable`.
+- **Unavailable** entities stay on screen, greyed out, rather than vanishing.
+- **Names** come from HA, but a non-ASCII name falls back to the entity_id's object part (`light.living_room` → "living room") because the only font compiled in is `montserrat_14`.
 
 ---
 
@@ -111,60 +104,63 @@ Symptoms of getting Zadig wrong:
 - No COM port appears → CDC interface mis-driven.
 - `idf.py flash` complains about libusb / cannot open device → JTAG interface mis-driven.
 
-## 5. Configure WiFi, Beszel, and Claude usage
+## 5. Configure WiFi and Home Assistant
 
-The build needs WiFi credentials, the Beszel server details, and the Claude-usage CSV URL before anything will show on screen. Open the Kconfig editor:
+### 5a. Create a long-lived access token
+
+**The HA REST API does not accept your username and password** — those only log into the web UI. It takes a long-lived token instead.
+
+1. Log into Home Assistant in a browser.
+2. Click your user name, bottom-left.
+3. Open the **Security** tab and scroll to **Long-lived access tokens**.
+4. **Create token**, name it `box3`, and copy the string. **It is shown once and cannot be retrieved afterwards.**
+
+The default lifespan is 10 years, so the firmware carries no token-refresh logic.
+
+### 5b. Label the entities you want on screen
+
+The firmware shows exactly the entities carrying one label. In Home Assistant:
+
+1. **Settings → Areas & labels → Labels → Create label**, named `box3`.
+2. For each entity you want: open it → **Settings** (gear) → **Labels** → add `box3`.
+
+Label whatever you like from the `light`, `switch` and `sensor` domains. Anything else is skipped with a log line.
+
+> **Why a label instead of "just show every switch"?** Because Home Assistant gives you no way to tell a real device from an integration's own config entities. `switch.tapo_p1_led` and `switch.tapo_p1_auto_off_enabled` sit in the same domain and the same area as `switch.tapo_p1`, with no `device_class` and no `entity_category` visible to the template API — all five discriminators return identical values (measured; see [`claude_test/README.md`](claude_test/README.md)). On the test server a domain sweep put 18 switches on screen of which 3 were real plugs. The label is the only thing that separates them.
+
+### 5c. Fill in Kconfig
 
 ```
 Ctrl+E G                # or Command Palette → "ESP-IDF: SDK Configuration editor"
 ```
 
-Navigate to `(Top) → Beszel monitor` and fill in:
+Navigate to `(Top) → Home Assistant client`:
 
 | Option | Example value |
 |---|---|
 | WiFi SSID | `home-2.4g` |
 | WiFi password | `…` |
-| Beszel base URL | `http://10.16.21.197:8090` |
-| Beszel identity | `you@example.com` |
-| Beszel password | `…` |
-| Poll interval (seconds) | `5` (default) |
-| Max hosts cached | `16` (default) |
+| Home Assistant base URL | `http://192.168.1.232:8123` |
+| Long-lived access token | `eyJhbGciOi…` (from 5a) |
+| Home Assistant label to show | `box3` (default) |
+| Poll interval (seconds) | `10` (default) |
+| Max labelled entities | `16` (default) |
 
-Then `(Top) → Claude usage tab`:
+Save and close. Values land in the **local `sdkconfig`** file, which is git-ignored — the token and WiFi password never get committed. `sdkconfig.defaults` only carries non-secret hardware defaults (PSRAM, flash size, etc.) and stays tracked.
 
-| Option | Example value |
-|---|---|
-| Claude usage CSV URL | `http://192.168.1.16:8765/ClaudeUsage.csv` |
-| Poll interval (seconds) | `30` (default) |
+### 5d. Check HA is reachable before you flash
 
-Save and close. Values land in the **local `sdkconfig`** file, which is git-ignored — credentials never get committed. `sdkconfig.defaults` only carries non-secret hardware defaults (PSRAM, flash size, etc.) and stays tracked.
-
-### Run the Claude usage server on the host PC
-
-The Claude tab pulls its data from a tiny Python HTTP server you run on the same LAN. Open a terminal where `ClaudeUsage.csv` lives (the workspace root by default) and start:
+Confirm the token and the label from your PC first — debugging this over a serial log is far slower:
 
 ```powershell
-python container/Espress_dev/claude_usage_server.py
-# Defaults: --port 8765, --bind 0.0.0.0, --csv ../../ClaudeUsage.csv
+curl -s -X POST "http://192.168.1.232:8123/api/template" `
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" `
+  -d '{\"template\":\"{{ label_entities(''box3'') | join(''\n'') }}\"}'
 ```
 
-The script depends only on the Python standard library — no `pip install` required.
+It should list your labelled entity IDs. `401` means the token is wrong; an empty result means the label is empty or misspelled.
 
-**Windows Firewall**: the first launch usually prompts to allow inbound traffic. Accept it for at least the **Private** profile. If you missed the prompt and the ESP shows `server unreachable`, create the rule manually:
-
-```powershell
-New-NetFirewallRule -DisplayName "ClaudeUsage CSV server" -Direction Inbound `
-    -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
-```
-
-Sanity-check from **another machine** on the LAN (not the same PC — see [LearnedPatterns §5.9](LearnedPatterns.md)):
-
-```
-curl http://192.168.1.16:8765/ClaudeUsage.csv
-```
-
-If `curl` works from a second host but the ESP still fails, the firewall is the most likely culprit.
+Plain HTTP only — HTTPS would need a cert bundle and is not configured.
 
 ## 6. Build, Flash, Monitor
 
@@ -185,19 +181,23 @@ First-time sequence: `Ctrl+E T` → `Ctrl+E P` → `Ctrl+E G` (credentials) → 
 
 Expected first-boot output (truncated):
 ```
-I (xxx) main: Beszel monitor starting
+I (xxx) main: Home Assistant client starting
 I (xxx) ESP-BOX-3: Setting LCD backlight: 100%
 I (xxx) ui: ui ready
+I (xxx) buttons: registered 3 buttons
 I (xxx) network: starting wifi, ssid="..."
 I (xxx) network: got IP 192.168.x.x
-I (xxx) beszel: auth OK (token len=NNN)
-I (xxx) beszel: raw systems response (NNN bytes), first chunk follows:
-I (xxx) beszel:  {"items":[ ... full JSON of every monitored host ... ]}
-I (xxx) beszel: K systems parsed
-I (xxx) claude_usage: session=5%% week=31%% reset=4h46m ts=2026-05-12 8:34
+I (xxx) ha_client: parsed 9 entities: 0 lights, 6 switches, 3 sensors
 ```
 
-The LCD then shows one tab per Beszel host plus the `Claude` tab at the end.
+The LCD then shows one tab per domain that had a labelled entity. Touching a switch adds:
+
+```
+I (xxx) ha_client: /api/services/switch/turn_on ok
+I (xxx) ha_client: parsed 9 entities: 0 lights, 6 switches, 3 sensors
+```
+
+`parsed 0 entities` means the label is empty or misspelled — re-run the curl check in [5d](#5d-check-ha-is-reachable-before-you-flash).
 
 ---
 
@@ -205,21 +205,22 @@ The LCD then shows one tab per Beszel host plus the `Claude` tab at the end.
 
 ```
 Espress_dev/
-├── main/
-│   ├── main.c              # app_main: bsp → ui_create → buttons → network → beszel → claude_usage
-│   ├── ui.c, ui.h          # dynamic per-host tabview + always-present Claude tab + ui_select_*_tab cycling
-│   ├── network.c, .h       # non-blocking WiFi STA + auto-reconnect task
-│   ├── beszel.c, .h        # PocketBase REST client + 5 s poll task + host cache
-│   ├── claude_usage.c, .h  # 30 s CSV poll task + UTF-8 "X시간 Y분" parser
-│   ├── usage_led.c, .h     # PMOD1 RGB LED heartbeat — 300 ms orange pulse on each successful Claude poll
+├── main/                   # ← the firmware this README builds
+│   ├── main.c              # app_main: bsp → ui_create → buttons → network → ha_client
+│   ├── ui.c, ui.h          # domain tabview, lv_switch rows, sensor rows, tab cycling
+│   ├── network.c, .h       # non-blocking WiFi STA + auto-reconnect
+│   ├── ha_client.c, .h     # HA REST client: template poll, TSV parse, command queue
 │   ├── buttons_check.c, .h # CONFIG / MUTE physical buttons → ui_select_*_tab callbacks
-│   ├── Kconfig.projbuild   # menuconfig: Beszel + Claude usage
+│   ├── Kconfig.projbuild   # menuconfig: Home Assistant client
 │   ├── CMakeLists.txt      # SRCS + REQUIRES (esp_wifi, esp_http_client, …)
 │   └── idf_component.yml   # Managed components (esp-box-3 BSP, espressif/cjson)
-├── claude_usage_server.py  # host-side HTTP server that exposes ClaudeUsage.csv
-├── examples/               # standalone reference projects (sensor self-test, Beszel-only)
-│   ├── sensor_example/     # frozen snapshot of the prior BOX-3 self-test (standalone idf project)
-│   └── server_monitor/     # frozen snapshot of the Beszel-only build before the Claude tab
+├── examples/               # other standalone firmware, each its own idf project
+│   ├── sensor_example/     # BOX-3 peripheral self-test (6-tab dashboard)
+│   ├── server_monitor/     # Beszel host monitor + Claude usage tab + RGB LED
+│   ├── smart_plug/         # Tapo plugs via a FastAPI bridge
+│   ├── hotplate_controller/# hotplate temperature/stir control
+│   └── sy01b_firmware/     # syringe pump client
+├── claude_test/            # throwaway probes + what each one taught us
 ├── sdkconfig.defaults      # hardware Kconfig (16 MB flash, octal PSRAM, LVGL float, …)
 ├── managed_components/     # auto-pulled libraries — DO NOT EDIT BY HAND
 ├── CLAUDE.md               # coding rules + initialization order documentation
@@ -228,9 +229,17 @@ Espress_dev/
 └── README.md               # this file
 ```
 
-`app_main` initialization order is non-negotiable (see [CLAUDE.md](CLAUDE.md) "Initialization order"): I²C → display → backlight → UI under display lock → buttons → network → Beszel → usage LED → Claude usage. Touching this order risks LVGL panics or WiFi/HTTP failure modes that look like network bugs. `usage_led_init()` must run before `claude_usage_init()` so the poll task always sees a valid LED handle on its first successful response.
+`app_main` initialization order is non-negotiable (see [CLAUDE.md](CLAUDE.md) "Initialization order"): I²C → display → backlight → UI under display lock → buttons → network → HA client. Touching this order risks LVGL panics or WiFi/HTTP failure modes that look like network bugs.
 
-Tab cycling is owned by [`ui.c`](main/ui.c): `ui_select_prev_tab` / `ui_select_next_tab` walk `lv_tabview_get_tab_count()`, so the buttons naturally include the Claude tab without either polling module needing to know about it. Pollers pass `active_idx = -1` to [`ui_beszel_replace_hosts`](main/ui.h) so they cannot fight the user's manual tab selection.
+### How the client works
+
+- **Discovery and polling are one request.** Every `CONFIG_HA_CLIENT_POLL_INTERVAL_S`, [`ha_client.c`](main/ha_client.c) renders one Jinja template server-side via `POST /api/template` and gets back ~500 bytes of tab-separated text. `GET /api/states` would drag back every entity in the installation — hundreds of KB — and truncate against the 8 KB buffer.
+- **Touch never does HTTP.** An LVGL callback that blocks 1–3 s on a request trips the watchdog. The callback resolves the entity_id and posts it to a queue; the worker's `xQueueReceive(q, &cmd, period)` doubles as the poll timer — a command short-cuts the wait, a timeout means refresh.
+- **The command carries an entity_id, not an index.** By the time the worker drains the queue it may have re-polled and reshuffled the cache, and a stale index would switch the wrong device.
+- **`turn_on` / `turn_off`, never `toggle`.** A toggle issued against a stale screen lands on the opposite of what was asked.
+- **Lock order is one-way.** `on_ui_action` runs with the LVGL lock held and takes the cache mutex; the worker must therefore never hold the cache mutex while calling into `ui_*`. `publish_to_ui()` copies under the lock, releases, *then* draws.
+
+Tab cycling is owned by [`ui.c`](main/ui.c): `ui_select_prev_tab` / `ui_select_next_tab` walk `lv_tabview_get_tab_count()`, so the buttons work regardless of which domains ended up with tabs.
 
 ---
 
@@ -247,9 +256,9 @@ Tab cycling is owned by [`ui.c`](main/ui.c): `ui_select_prev_tab` / `ui_select_n
 | **IR** | RX pulse count + "Send Test" NEC frame over the IR diodes |
 | **Btn** | Short / long press counters for CONFIG, MUTE, MAIN buttons |
 
-It existed to **verify each peripheral worked** before any application code was written. Now that those peripherals are confirmed and the project's purpose has narrowed to the Beszel + Claude dashboard, the self-test source lives here as documentation and re-validation tool.
+It existed to **verify each peripheral worked** before any application code was written. Those peripherals are confirmed, so the self-test now lives on as documentation and a re-validation tool.
 
-Unlike the old layout, `examples/sensor_example/` is a **standalone ESP-IDF project** — it has its own top-level `CMakeLists.txt`, `sdkconfig.defaults`, and `main/` subdirectory. Build it directly:
+It is a **standalone ESP-IDF project** — its own top-level `CMakeLists.txt`, `sdkconfig.defaults`, and `main/`. Every project under `examples/` builds the same way:
 
 ```powershell
 cd examples/sensor_example
@@ -257,7 +266,7 @@ idf.py set-target esp32s3
 idf.py -p COM<N> flash monitor
 ```
 
-`examples/server_monitor/` is similarly an older snapshot — the **Beszel-only build before the `Claude` tab was added**. See [`examples/README.md`](examples/README.md) for the full inventory and rationale.
+Code is deliberately **not** shared between them: `network.c` exists as several near-identical copies differing only in their `CONFIG_*` key names. Promoting it to a common `components/` was tried and rejected because the signatures had already drifted apart per project. Copy and rename the keys — that is the sanctioned workflow here. See [`examples/README.md`](examples/README.md) for the full inventory.
 
 ---
 
@@ -265,25 +274,31 @@ idf.py -p COM<N> flash monitor
 
 These cost real time and are documented in detail with file/line references in [LearnedPatterns.md](LearnedPatterns.md):
 
-- **Windows Firewall silently blocks ESP → Python `http.server`** — `curl` from the **same PC** as the server hits the loopback path and bypasses the firewall, so "curl works locally" is **not** a proof the ESP can reach it. Always test from a second machine. See LP §5.9.
+- **The HA REST API rejects your username and password** — they only log into the web UI. It needs a long-lived access token; see [5a](#5a-create-a-long-lived-access-token). A `401` with credentials that "definitely work" is this, every time.
+- **`GET /api/states` does not fit on the device** — it returns *every* entity, hundreds of KB on a real install, and truncates against the response buffer. Render a filtered Jinja template with `POST /api/template` instead and let HA do the work; the payload drops to ~500 bytes. This is LP §2.3's rule (bound the payload at the source, not the device buffer) in a second guise.
+- **HA cannot tell a real device from an integration's config entities** — `switch.plug_led` and `switch.plug` share a domain and an area, both have `device_class: NONE`, and `entity_category` is not exposed to templates. There is no attribute to filter on; that is why this firmware uses a label. Measured on a live server — see [`claude_test/README.md`](claude_test/README.md).
+- **Windows Firewall silently blocks ESP → Python `http.server`** — `curl` from the **same PC** as the server hits the loopback path and bypasses the firewall, so "curl works locally" is **not** a proof the ESP can reach it. Always test from a second machine. See LP §5.9. (Does not apply to Home Assistant itself, which is a separate host.)
 - **`json` component is missing in ESP-IDF v6.x** — cJSON is now the standalone managed component `espressif/cjson`. The legacy `REQUIRES json` line fails to resolve. Declare `espressif/cjson` in [main/idf_component.yml](main/idf_component.yml).
 - **`NAME_MAX` collides with picolibc's filesystem constant** (255). The xtensa-esp-elf toolchain pulls `<sys/syslimits.h>` transitively through BSP / FreeRTOS headers — never `#define NAME_MAX` in your own code. Rename to e.g. `HOST_NAME_MAX_LEN`.
 - **`printf("%u", uint32_t)` is `-Werror=format=` under picolibc** — on the xtensa target, `uint32_t = unsigned long`, not `unsigned int`. Cast to `(unsigned)` or use `PRIu32` from `<inttypes.h>`.
-- **Beszel `info.g` (GPU usage) is `omitempty`** — when current GPU usage is exactly 0 %, the JSON field is dropped entirely. A single snapshot of `/api/collections/systems/records` cannot distinguish "host has no GPU" from "host's GPU is idle". This firmware sidesteps the ambiguity by always rendering the GPU bar and defaulting to 0 % when the field is absent.
 - **`idf.py flash` cannot find the chip** — usually the USB-C cable is power-only, or Zadig drivers are swapped.
 - **`sdkconfig` overrides `sdkconfig.defaults`** once it exists. If you flip a Kconfig value in `sdkconfig.defaults` but the build still uses the old value, the answer is in `sdkconfig` — either patch it there too, or delete it and `idf.py reconfigure`.
-- **LVGL's default font has no Hangul glyphs** — only `lv_font_montserrat_14` is enabled. The Claude tab works around this by parsing the CSV's Korean "X시간 Y분" reset time on the ESP and rendering English "Xh YYm". Enabling `LV_FONT_SOURCE_HAN_SANS_SC_*_CJK` adds ~200 KB of flash and even then SC may not cover Hangul — keep parsing on the ESP.
+- **LVGL's default font has no Hangul glyphs** — only `lv_font_montserrat_14` is enabled. This firmware works around it by falling back to the entity_id's object part when a friendly name is not ASCII (`pick_display_name()` in [main/ha_client.c](main/ha_client.c)); HA always slugifies entity IDs to ASCII. Enabling `LV_FONT_SOURCE_HAN_SANS_SC_*_CJK` adds ~200 KB of flash and even then SC may not cover Hangul — keep the fallback on the ESP.
 - **Not every GPIO is free for re-use, and not every pin can drive LEDC PWM** — on ESP32-S3 BOX-3, strapping pins (GPIO 0, 3, 45, 46), the flash/PSRAM data lanes (GPIO 26-37 with octal PSRAM), the USB-Serial-JTAG pair (GPIO 19/20), and pins claimed by the BSP for touch/audio/display/SD all have hard restrictions. Assigning `ledc_channel_config` to a pin that does not support LEDC routing on this part, or one already owned by the BSP, panics at boot — often *after* `gpio_config` returns OK, so the symptom is a reset loop rather than an `ESP_ERROR_CHECK` print. The Claude heartbeat LED uses PMOD1 (GPIO 21 / 38 / 39 = IO5/IO7/IO3) and drives it as plain digital ON/OFF for exactly this reason. See [LearnedPatterns §4.2](LearnedPatterns.md#42-verify-gpio-capability-and-current-usage-before-assigning-a-pin-datasheet--bsp--project) for the three-step pre-flight check (datasheet capability → BSP grep → project grep) before claiming any new GPIO.
 
 ---
 
-## Adding your own metric / endpoint
+## Extending it
+
+**Adding a device needs no code at all** — label it `box3` in Home Assistant and it shows up on the next poll. That is the whole point of the label design.
+
+Code changes are only for new *kinds* of thing:
 
 1. Read [CLAUDE.md](CLAUDE.md) §2 (style) and §7 (research-before-coding).
-2. If the metric comes from a new Beszel field, look at the **raw JSON dump** that prints once on first boot (`I beszel: raw systems response (...)`). It shows exactly what keys Beszel is sending for your host.
-3. Add the new key to `cpu_keys[]` / `mem_keys[]` / `gpu_keys[]` (or create a new key list) in [parse_one_system in main/beszel.c](main/beszel.c).
-4. Extend [`ui_beszel_host_t` in main/ui.h](main/ui.h) and the per-tab widgets in [build_host_tab in main/ui.c](main/ui.c) (every LVGL call from outside the LVGL task **must** be wrapped in `bsp_display_lock` / `bsp_display_unlock` — the `UI_WITH_LOCK` macro handles this).
-5. For a **new data source unrelated to Beszel**, follow the Claude usage pattern: a dedicated `main/<feature>.c/h` module with its own Kconfig menu, its own poll task, its own `ui_<feature>_set_data()` UI API, and (if needed) a companion Python script for the host side. Do not bolt unrelated data into `beszel.c`.
+2. **Prove it against the real server before writing firmware.** Copy [`claude_test/probe_ha_template.py`](claude_test/probe_ha_template.py) and render your candidate template over REST. This is what caught the original domain-sweep design being unworkable — before the first flash, at the cost of a few lines instead of a debugging session over a serial log.
+3. **A new domain** (e.g. `climate`): add it to `domain_from_name()` and `kind_of()` in [main/ha_client.c](main/ha_client.c), add a `ui_ha_kind_t` in [main/ui.h](main/ui.h), and give it a row builder and a `TABS[]` entry in [main/ui.c](main/ui.c).
+4. **A new attribute** (e.g. light brightness): add it to the template in `build_template()`, widen `MAX_TSV_FIELDS`, and carry it through `ha_entity_t` → `ui_ha_entity_t`. Every LVGL call from outside the LVGL task **must** be wrapped in `bsp_display_lock` / `bsp_display_unlock` — the `UI_WITH_LOCK` macro handles this.
+5. **A new data source unrelated to Home Assistant** gets its own module — its own Kconfig menu, poll task, and `ui_*` API — or its own standalone project under `examples/`. Do not bolt unrelated data into `ha_client.c`.
 6. Append a dated section to [ToDo.md](ToDo.md), then check items off as you go.
 7. When the work is done, distill any new gotcha into [LearnedPatterns.md](LearnedPatterns.md).
 

@@ -669,24 +669,26 @@ GPIO 충돌 확인:
 
 명령: "ESP32S3를 통해 HomeAssistant 서버에 연결되어있는 사물인터넷 장치들을 다루고 싶어" → "/main 폴더에서 진행해줘". 대상: 루트 `main/` (hotplate 이동으로 비워진 자리). HA 서버 `http://192.168.1.232:8123`. 설계 결정(사용자 확인): REST 폴링 / 조명·스위치 제어 + 센서 표시 / 엔티티 자동 발견 / device_class 필터 / 도메인별 탭뷰. (see LP §2.1, §2.3, §3.1, §3.7, §3.11, §5.7, §5.9)
 
-- [ ] 루트 `CMakeLists.txt` 프로젝트명 `my_box3_sensor` → `home_assistant_client` (IMU 데모 시절 이름으로 이미 stale)
-- [ ] 루트 `sdkconfig.defaults` 에서 죽은 LVGL 8 심볼 `CONFIG_LV_MEM_CUSTOM` / `CONFIG_LV_MEMCPY_MEMSET_STD` 2줄 제거 (LP §3.11) — `CONFIG_LV_USE_FLOAT=y` 는 센서 `%f` 출력에 필요하므로 유지 (LP §3.1)
-- [ ] 낡은 루트 `sdkconfig` 제거 — hotplate 키만 남아있어 무의미. 재생성 후 HA_CLIENT_ 신규 키에 default 반영 (LP §2.1 corollary: 신규 키는 default 자동 적용). sdkconfig 는 gitignore 대상이라 WiFi/토큰을 여기 넣어도 유출 없음
-- [ ] `main/Kconfig.projbuild` — 메뉴 "Home Assistant client", 접두사 `HA_CLIENT_` (`HA_` 는 짧아 충돌 위험). 키: WIFI_SSID / WIFI_PASSWORD / SERVER_URL / TOKEN / POLL_INTERVAL_S / MAX_PER_DOMAIN / SENSOR_CLASSES
-- [ ] `main/CMakeLists.txt` + `main/idf_component.yml` — `json` 을 REQUIRES 에 넣지 않고 `espressif/cjson` managed component 사용 (LP §3.7)
-- [ ] `main/network.c/.h` — `examples/smart_plug/` 에서 복사 후 `CONFIG_SMART_PLUG_WIFI_*` → `CONFIG_HA_CLIENT_WIFI_*` 개명 (공용 components/ 승격 안 함 — ToDo 2026-05-21 결정)
-- [ ] `main/buttons_check.c/.h` — `examples/server_monitor/` 에서 복사 (CONFIG→prev tab, MUTE→next tab)
-- [ ] `main/ha_client.c/.h` — `POST /api/template` 폴링. `/api/states` 는 전체 엔티티라 수십~수백 KB → 버퍼 초과로 잘림, LP §2.3 규칙대로 소스(HA)에서 Jinja 로 필터해 ~2KB 로 축소. 요청 본문은 cJSON 으로 조립(탭/개행/따옴표 escape). 응답은 평문 TSV → 줄 단위 파싱
-- [ ] `main/ha_client.c` — 명령 큐 + 워커 태스크 (`smart_plug.c:431-512` 이식). LVGL 콜백에서 HTTP 금지(WDT), `xQueueReceive(q,&cmd,period)` 가 폴 타이머 겸 명령 대기. 스택 8192 (HTTP+cJSON 중첩)
-- [ ] `main/ha_client.c` — `toggle` 대신 명시적 `turn_on`/`turn_off` (폴링 지연 중 2회 탭 시 toggle 은 의도와 반대로 끝남). 상한 초과 시 조용히 버리지 않고 ESP_LOGW
-- [ ] `main/ui.c/.h` — lv_tabview 320×220 + 하단 상태 라벨 (`server_monitor/ui.c` 구조). Lights/Switch/Sensor 탭, 0개면 탭 미생성. UI_WITH_LOCK 매크로, topology_changed → rebuild (전체 이름으로 비교)
-- [ ] `main/ui.c` — 스위치 재진입 가드: 폴링 반영 시 `lv_obj_add_state` 가 VALUE_CHANGED 를 되쏘는지 하드웨어 검증. `s_applying` 플래그로 방어 후 불필요하면 제거
-- [ ] `main/main.c` — init 순서 고정: bsp_i2c_init → bsp_display_start → backlight_on → lock/ui_create/unlock → buttons_check_init → network_init → ha_client_init
-- [ ] **선행(사용자)**: HA 장기 액세스 토큰 발급 — HA REST API 는 id/pw 를 받지 않음. `arduino`/`peal2024` 로 로그인 → 프로필 → 보안 → 장기 액세스 토큰 → 생성. beszel 식 토큰 갱신 로직 불필요(기본 10년)
-- [ ] 플래시 전 curl 로 `/api/template` 도달 확인 — HA 는 별도 호스트(.232)라 loopback 아님, LP §5.9 함정에 안 걸리는 유효 테스트. 조명 목록·응답 크기 확인 후 device_class 필터 조정
-- [ ] 무경고 빌드 (LP §5.7 레시피, `run_in_background`) — 컴파일 경고 0건 + unknown kconfig symbol 0건
+- [x] 루트 `CMakeLists.txt` 프로젝트명 `my_box3_sensor` → `home_assistant_client` (IMU 데모 시절 이름으로 이미 stale)
+- [x] 루트 `sdkconfig.defaults` 에서 죽은 LVGL 8 심볼 `CONFIG_LV_MEM_CUSTOM` / `CONFIG_LV_MEMCPY_MEMSET_STD` 2줄 제거 (LP §3.11) — `CONFIG_LV_USE_FLOAT=y` 는 센서 `%f` 출력에 필요하므로 유지 (LP §3.1)
+- [x] 낡은 루트 `sdkconfig` 제거 — hotplate 키만 남아있어 무의미. 재생성 후 HA_CLIENT_ 신규 키에 default 반영 (LP §2.1 corollary: 신규 키는 default 자동 적용). sdkconfig 는 gitignore 대상이라 WiFi/토큰을 여기 넣어도 유출 없음
+- [x] `main/Kconfig.projbuild` — 메뉴 "Home Assistant client", 접두사 `HA_CLIENT_` (`HA_` 는 짧아 충돌 위험). 키: WIFI_SSID / WIFI_PASSWORD / SERVER_URL / TOKEN / POLL_INTERVAL_S / MAX_PER_DOMAIN / SENSOR_CLASSES
+- [x] `main/CMakeLists.txt` + `main/idf_component.yml` — `json` 을 REQUIRES 에 넣지 않고 `espressif/cjson` managed component 사용 (LP §3.7)
+- [x] `main/network.c/.h` — `examples/smart_plug/` 에서 복사 후 `CONFIG_SMART_PLUG_WIFI_*` → `CONFIG_HA_CLIENT_WIFI_*` 개명 (공용 components/ 승격 안 함 — ToDo 2026-05-21 결정)
+- [x] `main/buttons_check.c/.h` — `examples/server_monitor/` 에서 복사 (CONFIG→prev tab, MUTE→next tab)
+- [x] `main/ha_client.c/.h` — `POST /api/template` 폴링. `/api/states` 는 전체 엔티티라 수십~수백 KB → 버퍼 초과로 잘림, LP §2.3 규칙대로 소스(HA)에서 Jinja 로 필터해 ~2KB 로 축소. 요청 본문은 cJSON 으로 조립(탭/개행/따옴표 escape). 응답은 평문 TSV → 줄 단위 파싱
+- [x] `main/ha_client.c` — 명령 큐 + 워커 태스크 (`smart_plug.c:431-512` 이식). LVGL 콜백에서 HTTP 금지(WDT), `xQueueReceive(q,&cmd,period)` 가 폴 타이머 겸 명령 대기. 스택 8192 (HTTP+cJSON 중첩)
+- [x] `main/ha_client.c` — `toggle` 대신 명시적 `turn_on`/`turn_off` (폴링 지연 중 2회 탭 시 toggle 은 의도와 반대로 끝남). 상한 초과 시 조용히 버리지 않고 ESP_LOGW
+- [x] `main/ui.c/.h` — lv_tabview 320×220 + 하단 상태 라벨 (`server_monitor/ui.c` 구조). Lights/Switch/Sensor 탭, 0개면 탭 미생성. UI_WITH_LOCK 매크로, topology_changed → rebuild (전체 이름으로 비교)
+- [x] `main/ui.c` — 스위치 재진입 가드: 폴링 반영 시 `lv_obj_add_state` 가 VALUE_CHANGED 를 되쏘는지 하드웨어 검증. `s_applying` 플래그로 방어 후 불필요하면 제거
+- [x] `main/main.c` — init 순서 고정: bsp_i2c_init → bsp_display_start → backlight_on → lock/ui_create/unlock → buttons_check_init → network_init → ha_client_init
+- [x] **선행(사용자)**: HA 장기 액세스 토큰 발급 — HA REST API 는 id/pw 를 받지 않음. HA 계정으로 로그인 → 프로필 → 보안 → 장기 액세스 토큰 → 생성. beszel 식 토큰 갱신 로직 불필요(기본 10년)
+- [x] 플래시 전 curl 로 `/api/template` 도달 확인 — HA 는 별도 호스트(.232)라 loopback 아님, LP §5.9 함정에 안 걸리는 유효 테스트. 조명 목록·응답 크기 확인 후 device_class 필터 조정
+- [x] 무경고 빌드 (LP §5.7 레시피, `run_in_background`) — 컴파일 경고 0건 + unknown kconfig symbol 0건
 - [ ] 하드웨어 검증: 읽기(화면 vs HA 웹UI) / 쓰기(BOX-3 터치 → 실제 조명) / 역방향(HA 웹UI 변경 → 폴 주기 내 반영) / 토폴로지 변경
 - [ ] 루트 `README.md` 갱신 (54a0d12 시점부터 Beszel 기준으로 stale) + `LearnedPatterns.md` 에 새 gotcha append
 - [ ] GitHub Issue 생성 + 커밋/푸시
 
 메모: 범위 제외 — WebSocket 푸시(1단계는 REST 폴링, 상태 변경 최대 10초 지연 감수하고 재연결·핑퐁·메시지ID 관리 회피), 밝기/색온도 슬라이더, climate 도메인, HTTPS(LAN 평문, 기존 앱 전부 동일). 루트 `CLAUDE.md` 의 "Project" 절은 IMU 데모(`my_box3_sensor`) 기준으로 이미 stale — 프로젝트명 변경과 함께 손볼지는 별건.
+
+메모(설계 변경, 2026-07-16 작업 중): 위 항목의 "엔티티 자동 발견 / device_class 필터 / 도메인별 탭뷰"는 **실제 서버를 프로브한 결과 폐기**되고 라벨 방식으로 대체됨. 근거는 `claude_test/probe_ha_attrs.py` 실행 결과 — HA는 진짜 기기(`switch.tapo_p1`)와 통합이 만든 설정 토글(`switch.tapo_p1_led`)을 구분할 수단을 **하나도** 노출하지 않는다: `entity_category`는 템플릿에서 `NOT_DEFINED`, 스위치 18개 전부 `device_class=NONE`, 속성은 `friendly_name`뿐, 설정 엔티티는 부모 기기의 area를 물려받아 전부 "Living Room". 도메인 스윕이면 스위치 18개 중 실제 플러그는 3개뿐인 화면이 나옴. 그래서 `CONFIG_HA_CLIENT_SENSOR_CLASSES` + `CONFIG_HA_CLIENT_MAX_PER_DOMAIN`을 `CONFIG_HA_CLIENT_LABEL` + `CONFIG_HA_CLIENT_MAX_ENTITIES`로 교체하고, 템플릿을 `label_entities('box3')` 기반으로 재작성. 사용자 확인 후 `claude_test/apply_ha_labels.py --apply`로 9개(uno_q led3 R/G/B, tapo_p1/p2/p3, tapo_p1/p2/p3 current_consumption)에 라벨 부여. 이 방식은 엔티티가 펌웨어에 하드코딩되지 않아 라벨만 추가하면 재플래시 없이 화면에 반영됨. 재진입 가드는 하드웨어 검증 대신 LVGL 소스로 확정 — `lv_obj.c:829-835`에서 VALUE_CHANGED는 입력 기반 `LV_EVENT_RELEASED` 핸들러에서만 발송되고 `lv_obj_add_state()`는 `update_obj_state()`로 스타일만 건드리므로 이벤트를 되쏘지 않음 → 가드 불필요, 이유를 주석으로 기록.
