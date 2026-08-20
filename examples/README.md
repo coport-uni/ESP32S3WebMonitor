@@ -7,6 +7,9 @@ Standalone ESP-IDF reference projects for the **ESP32-S3-BOX-3**. Each subfolder
 | [`sensor_example/`](sensor_example/) | Six-tab self-test of every BOX-3 + BOX-3-SENSOR peripheral (IMU, AHT30, AT581X radar, ES7210 mic, IR, buttons). The original firmware before the Beszel pivot. | `espressif/esp-box-3`, `espressif/icm42670` |
 | [`server_monitor/`](server_monitor/) | First Beszel-only build before the `Claude` tab was added. Polls a self-hosted Beszel/PocketBase instance and shows CPU/MEM/GPU bars per host. | `espressif/esp-box-3`, `espressif/cjson` |
 | [`hotplate_controller/`](hotplate_controller/) | Touch controller for a lab hotplate stirrer via the HotplateController FastAPI server. Plate/probe temperature, stir speed, setpoint +/- buttons. | `espressif/esp-box-3`, `espressif/cjson` |
+| [`smart_plug/`](smart_plug/) | Touch controller for TP-Link Tapo plugs via a LAN FastAPI bridge. No Tapo library on the device — plain HTTP/JSON. | `espressif/esp-box-3`, `espressif/cjson` |
+| [`sy01b_firmware/`](sy01b_firmware/) | LVGL client for the SY-01B syringe pump over a FastAPI bridge. | `espressif/esp-box-3`, `espressif/cjson` |
+| [`home_assistant_client/`](home_assistant_client/) | Home Assistant control panel. Toggles labelled lights/switches and shows labelled sensors; entity selection lives in HA labels, not in the firmware. | `espressif/esp-box-3`, `espressif/cjson` |
 
 Each example owns its `sdkconfig`, dependencies, and partition table; new features land in the folder of the firmware they belong to. Historically the active firmware lived at the repository root in `main/`, with these folders kept as snapshots of it — that root project no longer exists, and every app is now a peer under `examples/`.
 
